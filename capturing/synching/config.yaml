@@ -1,0 +1,20 @@
+
+# Reading Frames Augmented Data
+frames_folder: "../capturing/captured_frames/" #"/home/alireza/CG_Repository/CG_Emulator/1-  Capturing/kombat/kmb_frames"  # Input frames folder
+output_file: "./output/frame_log.txt"  # Output log file to store QR data
+output_folder: "./output/frames"  # Folder to save processed images
+
+# Reading the joysticklog Data
+frames_log: "./output/frame_log.txt"  # Path to the frame log file
+joystick_log: "../capturing/joystick_log.txt"  # Path to the joystick log file
+mix_file: "./output/mix.txt"  # Output file for the merged logs
+
+
+# Generating sync file
+output_log: "sync.txt"  # Path to the output log file with encrypted joystick commands
+
+
+# running scripts one by one 
+script1: "./modules/read_frames.py"  # Replace with the actual name of your first script
+script2: "./modules/mixing.py"  # Replace with the actual name of your second script
+script3: "./modules/ordering.py"  # Replace with the actual name of your third script

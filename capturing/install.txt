@@ -1,0 +1,19 @@
+
+(1) Install
+
+### Joystick Loggra phically on linux ###
+# install
+$ sudo apt update
+$ sudo apt install joystick
+
+# Check the connected Joystick
+$ ls /dev/input/js*
+
+
+## Run to see the commands 
+$ jstest /dev/input/js0
+
+
+## Joystick & Screen capturing Modules
+$ pip install pygame
+$ sudo pip3 install mss --break-system-packages

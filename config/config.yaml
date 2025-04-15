@@ -1,0 +1,76 @@
+# CGReplay Configuration File
+# ---------------------------------------------------------------------------------------#
+# CG server configuration
+server:
+    server_IP: "10.0.0.1"                # Server computer IP address
+    server_port: 5000                    # UDP Port for receiving control (Joystick) commands from player
+    server_command_port: 5001            # not used yet!
+    server_interface: "server-eth0"      # Not Mandatory!
+    ##CGServerLog
+    log_rate_control: "./logs/srv_ratectl.txt"
+    log_server: "./logs/srv_total.txt"
+    log_frame: "./logs/srv_frame.txt"
+# ---------------------------------------------------------------------------------------#
+# CG  player configuration
+gamer:
+    player_IP: "10.0.0.2"                 # CG Gamer (or player) IP address
+    player_streaming_port: 5002           # UDP port for streaming (receiving) the frames of the video games!
+    palyer_command_port: 5003             # UDP Port for is binded in the server and used to send the command in the gamer system!
+    player_interface:  "player-eth0"      # Gamer interface name!
+    ## CG Player Log CGReplay/player/logs (rate/time logs + video frames in png)
+    player_rate_log: "./logs/ratelog_CG.txt"
+    player_time_log: "./logs/timelog_CG.txt"
+    received_frames: "./logs/received_frames"
+# ---------------------------------------------------------------------------------------#
+# Game Data Setup 
+Forza:  # possible values: Fortnite  or  Kombat
+    name: "Forza"
+    sync_file: "./syncs/sync_forza.txt"
+    frames: "./Forza"
+
+Fortnite: 
+    name: "Fortnite"
+    sync_file: "./syncs/sync_fortnite.txt"
+    frames: "./Fortnite"
+
+Kombat: 
+    name: "Kombat"
+    sync_file: "./syncs/sync_kombat.txt"
+    frames: "./Kombat"
+# ---------------------------------------------------------------------------------------#
+# Encoding setup 
+encoding:
+    name: "H.264" # Default 
+    fps: 30  # Frames per second
+    resolution:
+        width: 600 # default 1364
+        height: 400 # default 768
+    starting_bitrate: 5000
+    bitrate_min: 4000
+    bitrate_max: 10000
+# ---------------------------------------------------------------------------------------#
+# Synchronization Sliding Window
+sync: 
+    window_min: 1 
+    window_max: 4
+    ack_freq: 30 # Send Ack after receiving 30 frames!
+    ## Automatically increase and decrease the encoding rate (in CG server) based on frame quality and retransmission!
+    jump: 0.2
+    rise: 0.1
+    decrese: 0.2
+    fall: 0.2
+
+# ---------------------------------------------------------------------------------------#
+# CGReplay Running Setup
+Running:
+    game: "Kombat"     # Set it to start the CGReplay specific Game
+    live_watching: True    # If you want to watch live gameplay set 'True' else set 'False'
+    duration: 300   # in seconds
+    stop_frm_number: 100
+
+# ---------------------------------------------------------------------------------------#
+# ScreAM Setup
+protocols:
+    SCReAM: False # False = 0 / True = 1
+    sender: "../scream/scream/gstscream/scripts/sender.sh"
+    receiver: "../scream/scream/gstscream/scripts/receiver.sh"

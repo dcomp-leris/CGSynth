@@ -1,0 +1,28 @@
+
+# This Yaml file is designed for capturing the Cloud Gamin for CGReplay
+
+
+duration: 300   # in seconds
+# capture Screen
+fps: 30         # Frame Rate in frame per second (fps)
+frames_dir: "./captured_frames" # Create it to extract the frames in this folder
+video_file_prefix: "capture"  # This will be used to name the video file dynamically
+
+# capture Joystick
+log_file_prefix: "joystick_log"  # Prefix for the log file
+ticks_per_second: 60  # Number of ticks per second (sampling rate)
+
+# capturing pcap
+network_interface: "enp0s31f6"  # Network interface for tshark listening
+filename_prefix: "CG_pcap"  # Prefix pcap filenames
+script_joystick: "./modules/capture_joystick.py"  # Path to joystick capture script
+script_screen: "./modules/capture_screen.py"  # Path to screen capture script
+
+starting_waiting_time: 5 # The time the running script waits to start in the begining!
+
+
+# Enable & Disable the Capturing Features
+capturing_options:
+  enable_joystick: True
+  enable_screen: True
+  enable_pcap: True
