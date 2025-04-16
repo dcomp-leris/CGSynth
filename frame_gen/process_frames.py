@@ -4,14 +4,17 @@ import numpy as np
 import subprocess
 import tensorflow as tf
 import tensorflow_hub as hub
+import sys
 
 # Define the path to your frames folder
 original_folder = 'original_frames'
 processed_folder = 'processed_frames'
 
-# Create a new folder for processed frames (including both original and interpolated)
+# Create the 'processed_frames' folder if it does not exist
 if not os.path.exists(processed_folder):
     os.makedirs(processed_folder)
+    # Set the folder permissions to be writable by the script
+    os.chmod(processed_folder, 0o777)  # This ensures the folder is readable/writable by everyone
 
 def create_video_from_frames(frame_folder, output_path='output_video.mp4', fps=30):
     """
@@ -141,40 +144,43 @@ def process_frames(method='addWeighted'):
 
     frame_files = sorted([f for f in os.listdir(original_folder) if f.endswith('.png') or f.endswith('.jpg')])
 
+    #print("frame_files", frame_files)
+    #sys.exit(0)
+
     if len(frame_files) < 2:
         print("Error: Need at least 2 frames in the 'original_frames' folder.")
         return
 
     # Process frames in pairs, generating interpolated frames
-    for i in range(len(frame_files) - 1):
+    for i in range(0, len(frame_files) - 2, 2):
         frame1_path = os.path.join(original_folder, frame_files[i])
-        frame2_path = os.path.join(original_folder, frame_files[i + 1])
+        frame3_path = os.path.join(original_folder, frame_files[i + 2])
 
         frame1 = cv2.imread(frame1_path)
-        frame2 = cv2.imread(frame2_path)
+        frame3 = cv2.imread(frame3_path)
 
         # Save original frame
-        original_frame_dest = os.path.join(processed_folder, f'{(i*2+1):04d}.png')
+        original_frame_dest = os.path.join(processed_folder, f'{(i+1):04d}.png')
         cv2.imwrite(original_frame_dest, frame1)
         print(f"Saved original frame: {original_frame_dest}")
         
         try:
             # Create interpolated frame
-            interpolated_frame = interpolate(frame1, frame2)
-            interpolated_frame_dest = os.path.join(processed_folder, f'{(i*2+2):04d}.png')
+            interpolated_frame = interpolate(frame1, frame3)
+            interpolated_frame_dest = os.path.join(processed_folder, f'{(i+2):04d}.png')
             cv2.imwrite(interpolated_frame_dest, interpolated_frame)
             print(f"Saved interpolated frame: {interpolated_frame_dest}")
         except Exception as e:
             print(f"Error during interpolation: {e}")
             print("Using addWeighted interpolation as fallback")
-            interpolated_frame = addWeighted_interpolation(frame1, frame2)
-            interpolated_frame_dest = os.path.join(processed_folder, f'{(i*2+2):04d}.png')
+            interpolated_frame = addWeighted_interpolation(frame1, frame3)
+            interpolated_frame_dest = os.path.join(processed_folder, f'{(i+2):04d}.png')
             cv2.imwrite(interpolated_frame_dest, interpolated_frame)
             print(f"Saved fallback interpolated frame: {interpolated_frame_dest}")
     
     # Save the last original frame
     last_frame = cv2.imread(os.path.join(original_folder, frame_files[-1]))
-    last_frame_dest = os.path.join(processed_folder, f'{(len(frame_files)*2):04d}.png')
+    last_frame_dest = os.path.join(processed_folder, f'{(len(frame_files)-1):04d}.png')
     cv2.imwrite(last_frame_dest, last_frame)
     print(f"Saved last original frame: {last_frame_dest}")
 
@@ -196,12 +202,12 @@ if __name__ == "__main__":
     tf.config.threading.set_inter_op_parallelism_threads(1)
     tf.config.threading.set_intra_op_parallelism_threads(1)
     
-    #process_frames(method='addWeighted')  # or 'addWeighted'
+    method = 'film'
+
+    process_frames(method=method)  # or 'addWeighted'
 
     # generate the video for the original frames
-    #create_video_from_frames(original_folder, output_path='original_video.mp4')
+    create_video_from_frames(original_folder, output_path='original_video.mp4')
 
     # generate the video for the interpolated frames
-    create_video_from_frames(processed_folder, output_path='interpolated_video.mp4')
-
-    #create_video_from_frames('processed_frames_bkp_FILM', output_path='interpolated_video_bkp_FILM.mp4')
+    create_video_from_frames(processed_folder+'_{}'.format(method), output_path='interpolated_video_{}'.format(method)+'.mp4')
