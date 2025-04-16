@@ -6,9 +6,17 @@ import tensorflow as tf
 import tensorflow_hub as hub
 import sys
 
+method = 'addWeighted' # methods available: film, addWeighted
+
+original_res = [1920, 1080]
+downscaled_res = [1280, 720]
+upscaled_res = [1920, 1080]
+
 # Define the path to your frames folder
-original_folder = 'original_frames'
-processed_folder = 'processed_frames'
+#original_folder = 'original_frames_1920_1080'
+#original_folder = 'downscaled_original_frames_from_' + str(original_res[0]) + '_' + str(original_res[1]) + '_to_' + str(downscaled_res[0]) + '_' + str(downscaled_res[1])
+original_folder = 'upscaled_original_frames_from_' + str(downscaled_res[0]) + '_' + str(downscaled_res[1]) + '_to_' + str(original_res[0]) + '_' + str(original_res[1])
+processed_folder = 'processed_frames_' + method
 
 # Create the 'processed_frames' folder if it does not exist
 if not os.path.exists(processed_folder):
@@ -132,8 +140,9 @@ def process_frames(method='addWeighted'):
             print("FILM model loaded successfully")
         except Exception as e:
             print(f"Error loading FILM model: {e}")
-            print("Falling back to addWeighted interpolation")
-            method = 'addWeighted'
+            #print("Falling back to addWeighted interpolation")
+            #method = 'addWeighted'
+            sys.exit(1)
 
     # Set the interpolation function
     if method == 'film':
@@ -144,8 +153,9 @@ def process_frames(method='addWeighted'):
 
     frame_files = sorted([f for f in os.listdir(original_folder) if f.endswith('.png') or f.endswith('.jpg')])
 
-    #print("frame_files", frame_files)
+    #print("frame_files:", frame_files)
     #sys.exit(0)
+
 
     if len(frame_files) < 2:
         print("Error: Need at least 2 frames in the 'original_frames' folder.")
@@ -172,11 +182,7 @@ def process_frames(method='addWeighted'):
             print(f"Saved interpolated frame: {interpolated_frame_dest}")
         except Exception as e:
             print(f"Error during interpolation: {e}")
-            print("Using addWeighted interpolation as fallback")
-            interpolated_frame = addWeighted_interpolation(frame1, frame3)
-            interpolated_frame_dest = os.path.join(processed_folder, f'{(i+2):04d}.png')
-            cv2.imwrite(interpolated_frame_dest, interpolated_frame)
-            print(f"Saved fallback interpolated frame: {interpolated_frame_dest}")
+            sys.exit(1)
     
     # Save the last original frame
     last_frame = cv2.imread(os.path.join(original_folder, frame_files[-1]))
@@ -201,13 +207,11 @@ if __name__ == "__main__":
     # Set TensorFlow to use less memory overall
     tf.config.threading.set_inter_op_parallelism_threads(1)
     tf.config.threading.set_intra_op_parallelism_threads(1)
-    
-    method = 'film'
 
-    process_frames(method=method)  # or 'addWeighted'
+    process_frames(method=method)
 
     # generate the video for the original frames
     create_video_from_frames(original_folder, output_path='original_video.mp4')
 
     # generate the video for the interpolated frames
-    create_video_from_frames(processed_folder+'_{}'.format(method), output_path='interpolated_video_{}'.format(method)+'.mp4')
+    create_video_from_frames(processed_folder, output_path='interpolated_video_{}'.format(method)+'.mp4')
