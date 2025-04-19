@@ -2,7 +2,6 @@ from pathlib import Path
 from scapy.all import rdpcap, RTP
 import struct
 import os
-import binascii
 
 def extract_images_from_pcap(pcap_file="rtp_stream.pcap", output_dir="extracted_frames"):
     """
@@ -95,8 +94,7 @@ def extract_images_from_pcap(pcap_file="rtp_stream.pcap", output_dir="extracted_
         if timestamp not in frames_by_timestamp:
             frames_by_timestamp[timestamp] = {
                 'fragments': [],
-                'markers': [],
-                'complete': False
+                'markers': []
             }
         
         # Add this fragment and whether it has a marker
@@ -111,15 +109,6 @@ def extract_images_from_pcap(pcap_file="rtp_stream.pcap", output_dir="extracted_
         for fragment in frame_data['fragments']:
             full_data.extend(fragment)
         
-        # If any fragment had the marker bit set, consider this frame complete
-        if any(frame_data['markers']):
-            frame_data['complete'] = True
-        
-        # Debug: Save raw data for inspection even if not a valid PNG
-        debug_path = os.path.join(output_dir, f"debug_raw_{frame_count:04d}.bin")
-        with open(debug_path, 'wb') as f:
-            f.write(full_data)
-        
         # Look for PNG signature anywhere in the first 100 bytes
         png_start = -1
         for i in range(min(len(full_data) - 8, 100)):
@@ -133,19 +122,10 @@ def extract_images_from_pcap(pcap_file="rtp_stream.pcap", output_dir="extracted_
             frame_path = os.path.join(output_dir, f"frame_{frame_count:04d}.png")
             with open(frame_path, 'wb') as f:
                 f.write(png_data)
-            print(f"Saved frame {frame_count} to {frame_path} ({len(png_data)} bytes, PNG signature at offset {png_start})")
-        elif len(full_data) >= 8:
-            # Save anyway but warn about signature
-            frame_path = os.path.join(output_dir, f"frame_{frame_count:04d}.bin")
-            with open(frame_path, 'wb') as f:
-                f.write(full_data)
-            print(f"Warning: Frame {frame_count} doesn't start with PNG signature")
-            print(f"First 16 bytes: {binascii.hexlify(full_data[:16])}")
-            
-        frame_count += 1
+            print(f"Saved frame {frame_count} to {frame_path} ({len(png_data)} bytes)")
+            frame_count += 1
     
-    print(f"Extraction complete. {frame_count} frames processed.")
-    print(f"Check the {output_dir} directory for extracted files.")
+    print(f"Extraction complete. {frame_count} PNG frames extracted to {output_dir}")
     
     return frame_count
 
