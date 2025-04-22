@@ -1,0 +1,2 @@
+user_id,scene,video_A_filename,video_B_filename,A_score,B_score,A_comment,B_comment,video_A_is_real,video_B_is_real
+2EHG6lDbDE,scene_01,scene_01_interp.mp4,scene_01_real.mp4,5,5,N/A,N/A,False,True
