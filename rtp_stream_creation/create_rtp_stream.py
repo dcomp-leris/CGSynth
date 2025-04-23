@@ -37,7 +37,7 @@ def read_commands():
 
 def create_rtp_packets():
     base_path = Path(__file__).parent
-    image_folder = base_path.parent / "frame_gen" / "interpolation_methods" / "original_frames_1920_1080"
+    image_folder = base_path.parent / "frame_gen" / "original_frames" / "mortal_kombat_11" / "1920_1080"
     
     output_pcap = "rtp_stream.pcap"
 
