@@ -7,6 +7,8 @@ import tensorflow_hub as hub
 import sys
 import argparse
 from pathlib import Path
+import torch
+from rife import RIFE
 
 
 # Find the repo root (assuming `.git` folder is present at the root)
@@ -114,33 +116,74 @@ def film_interpolation(frame1, frame3, model):
     else:
         raise TypeError(f"Unexpected model output type: {type(output_dict)}")
 
+def rife_interpolation(frame1, frame3, model):
+    """
+    Interpolates between two frames using RIFE (Real-Time Intermediate Flow Estimation).
+    """
+    print("RIFE interpolation")
+    
+    # Convert BGR to RGB
+    frame1_rgb = cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB)
+    frame3_rgb = cv2.cvtColor(frame3, cv2.COLOR_BGR2RGB)
+    
+    # Convert to torch tensors and normalize
+    frame1_tensor = torch.from_numpy(frame1_rgb).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+    frame3_tensor = torch.from_numpy(frame3_rgb).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+    
+    # Move to GPU if available
+    if torch.cuda.is_available():
+        frame1_tensor = frame1_tensor.cuda()
+        frame3_tensor = frame3_tensor.cuda()
+        model = model.cuda()
+    
+    # Generate intermediate frame
+    with torch.no_grad():
+        interpolated_tensor = model(frame1_tensor, frame3_tensor)
+    
+    # Convert back to numpy and denormalize
+    interpolated_np = (interpolated_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255.0).astype(np.uint8)
+    
+    # Convert RGB back to BGR for OpenCV
+    interpolated_frame = cv2.cvtColor(interpolated_np, cv2.COLOR_RGB2BGR)
+    
+    return interpolated_frame
+
 def process_frames(method='addWeighted'):
     print(f"Using interpolation method: {method}")
 
     # Map method names to functions
     interpolation_methods = {
         'addWeighted': addWeighted_interpolation,
-        'film': None  # Will be set if 'film' is chosen
+        'film': None,  # Will be set if 'film' is chosen
+        'rife': None   # Will be set if 'rife' is chosen
     }
 
-    # Load FILM model if needed
+    # Load models if needed
     film_model = None
+    rife_model = None
+    
     if method == 'film':
         print("Loading FILM model from TensorFlow Hub...")
         try:
-            # Load the model from TensorFlow Hub
             film_model = hub.load("https://tfhub.dev/google/film/1")
             print("FILM model loaded successfully")
         except Exception as e:
             print(f"Error loading FILM model: {e}")
-            #print("Falling back to addWeighted interpolation")
-            #method = 'addWeighted'
+            sys.exit(1)
+    elif method == 'rife':
+        print("Loading RIFE model...")
+        try:
+            rife_model = RIFE()
+            print("RIFE model loaded successfully")
+        except Exception as e:
+            print(f"Error loading RIFE model: {e}")
             sys.exit(1)
 
     # Set the interpolation function
     if method == 'film':
-        # Create a wrapper function to include the model
         interpolate = lambda frame1, frame3: film_interpolation(frame1, frame3, film_model)
+    elif method == 'rife':
+        interpolate = lambda frame1, frame3: rife_interpolation(frame1, frame3, rife_model)
     else:
         interpolate = interpolation_methods[method]
 
@@ -188,8 +231,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Frame Interpolation Script')
     parser.add_argument(
         '--method', type=str, required=True,
-        choices=['film', 'addWeighted'],
-        help="Interpolation method to use: 'film' or 'addWeighted'"
+        choices=['film', 'addWeighted', 'rife'],
+        help="Interpolation method to use: 'film', 'addWeighted', or 'rife'"
     )
     parser.add_argument(
         '--game', type=str, required=True,
