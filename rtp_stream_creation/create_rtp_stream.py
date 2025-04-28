@@ -56,6 +56,7 @@ def create_rtp_packets():
     packets = []
 
     image_files = sorted([f for f in os.listdir(image_folder) if f.endswith(".png")])
+    print(f"Found {len(image_files)} image files in {image_folder}")
 
     images_sent = 0
 
