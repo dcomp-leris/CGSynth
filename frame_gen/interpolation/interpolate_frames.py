@@ -1,14 +1,14 @@
 import os
 import cv2
-import numpy as np
 import subprocess
-import tensorflow as tf
-import tensorflow_hub as hub
 import sys
 import argparse
 from pathlib import Path
-import torch
-from rife import RIFE
+import platform
+import venv
+import shutil
+import site
+from importlib import import_module
 
 
 # Find the repo root (assuming `.git` folder is present at the root)
@@ -119,34 +119,184 @@ def film_interpolation(frame1, frame3, model):
 def rife_interpolation(frame1, frame3, model):
     """
     Interpolates between two frames using RIFE (Real-Time Intermediate Flow Estimation).
+    This function uses the ECCV2022-RIFE repository's inference_image.py script through a virtual environment.
     """
-    print("RIFE interpolation")
+    print("RIFE interpolation using ECCV2022-RIFE repository...")
     
-    # Convert BGR to RGB
-    frame1_rgb = cv2.cvtColor(frame1, cv2.COLOR_BGR2RGB)
-    frame3_rgb = cv2.cvtColor(frame3, cv2.COLOR_BGR2RGB)
+    # Create temporary directory for frames
+    temp_dir = os.path.join(os.path.dirname(__file__), 'temp_frames')
+    os.makedirs(temp_dir, exist_ok=True)
     
-    # Convert to torch tensors and normalize
-    frame1_tensor = torch.from_numpy(frame1_rgb).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-    frame3_tensor = torch.from_numpy(frame3_rgb).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+    # Save frames to temporary directory
+    frame1_path = os.path.join(temp_dir, 'frame1.png')
+    frame3_path = os.path.join(temp_dir, 'frame3.png')
+    cv2.imwrite(frame1_path, frame1)
+    cv2.imwrite(frame3_path, frame3)
     
-    # Move to GPU if available
-    if torch.cuda.is_available():
-        frame1_tensor = frame1_tensor.cuda()
-        frame3_tensor = frame3_tensor.cuda()
-        model = model.cuda()
+    # Get the path to the RIFE repository
+    rife_repo_path = os.path.expanduser('~/git/ECCV2022-RIFE')
+    rife_venv_path = os.path.join(rife_repo_path, 'rife_venv')
     
-    # Generate intermediate frame
-    with torch.no_grad():
-        interpolated_tensor = model(frame1_tensor, frame3_tensor)
+    # Create a shell script to run the inference
+    script_path = os.path.join(temp_dir, 'run_rife.sh')
+    with open(script_path, 'w') as f:
+        f.write(f'''#!/bin/bash
+source "{rife_venv_path}/bin/activate"
+cd "{rife_repo_path}"
+python inference_img.py --img "{frame1_path}" "{frame3_path}" --exp 1
+''')
     
-    # Convert back to numpy and denormalize
-    interpolated_np = (interpolated_tensor.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255.0).astype(np.uint8)
+    # Make the script executable
+    os.chmod(script_path, 0o755)
     
-    # Convert RGB back to BGR for OpenCV
-    interpolated_frame = cv2.cvtColor(interpolated_np, cv2.COLOR_RGB2BGR)
+    try:
+        # Run the script
+        subprocess.run(['bash', script_path], check=True)
+        
+        # Read the interpolated frame from the output directory
+        interpolated_frame_path = os.path.join(rife_repo_path, 'output', 'img1.png')
+        interpolated_frame = cv2.imread(interpolated_frame_path)
+        
+        if interpolated_frame is None:
+            raise ValueError("Failed to read interpolated frame from output")
+        
+        # Clean up temporary files
+        shutil.rmtree(temp_dir)
+        shutil.rmtree(os.path.join(rife_repo_path, 'output'))
+        
+        return interpolated_frame
+        
+    except Exception as e:
+        print(f"Error during RIFE interpolation: {e}")
+        # Clean up temporary files in case of error
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        if os.path.exists(os.path.join(rife_repo_path, 'output')):
+            shutil.rmtree(os.path.join(rife_repo_path, 'output'))
+        raise
+
+def setup_rife_environment():
+    """
+    Sets up a Python 3.8.20 virtual environment for RIFE with specific dependencies.
+    Returns True if setup was successful, False otherwise.
+    """
+    python_version = platform.python_version_tuple()
+    if int(python_version[0]) == 3 and int(python_version[1]) == 8:
+        return True  # Current environment is compatible
     
-    return interpolated_frame
+    print("Setting up Python 3.8.20 environment for RIFE...")
+    
+    # Create a virtual environment
+    venv_path = os.path.join(os.path.dirname(__file__), 'rife_venv')
+    
+    # Remove existing venv if it exists
+    if os.path.exists(venv_path):
+        print("Removing existing virtual environment...")
+        try:
+            shutil.rmtree(venv_path)
+        except Exception as e:
+            print(f"Error removing existing virtual environment: {e}")
+            return False
+    
+    try:
+        # First check if python3.8 is available
+        try:
+            result = subprocess.run(['python3.8', '--version'], check=True, capture_output=True, text=True)
+            print(f"Found Python version: {result.stdout.strip()}")
+            python_cmd = 'python3.8'
+        except subprocess.CalledProcessError:
+            print("python3.8 not found. Please install Python 3.8 first.")
+            print("On Ubuntu, you can install it with:")
+            print("sudo add-apt-repository ppa:deadsnakes/ppa")
+            print("sudo apt update")
+            print("sudo apt install python3.8 python3.8-venv")
+            return False
+        
+        # Create virtual environment using python3.8
+        print(f"Creating virtual environment using {python_cmd}...")
+        subprocess.run([python_cmd, '-m', 'venv', venv_path], check=True)
+        
+        # Verify the virtual environment was created correctly
+        if sys.platform == "win32":
+            python_path = os.path.join(venv_path, "Scripts", "python.exe")
+        else:
+            python_path = os.path.join(venv_path, "bin", "python")
+        
+        if not os.path.exists(python_path):
+            print(f"Error: Virtual environment Python executable not found at {python_path}")
+            return False
+        
+        # Verify Python version in the virtual environment
+        result = subprocess.run([python_path, '--version'], check=True, capture_output=True, text=True)
+        print(f"Virtual environment Python version: {result.stdout.strip()}")
+        
+    except Exception as e:
+        print(f"Error creating virtual environment: {e}")
+        return False
+    
+    # Create a requirements file with all dependencies
+    requirements_content = """certifi==2025.4.26
+charset-normalizer==3.4.1
+decorator==4.4.2
+filelock==3.16.1
+fsspec==2025.3.0
+idna==3.10
+imageio==2.35.1
+imageio-ffmpeg==0.5.1
+Jinja2==3.1.6
+MarkupSafe==2.1.5
+moviepy==1.0.3
+mpmath==1.3.0
+networkx==3.1
+numpy==1.23.5
+opencv-python==4.11.0.86
+pillow==10.4.0
+proglog==0.1.11
+requests==2.32.3
+scipy==1.10.1
+setuptools==57.5.0
+sk-video==1.1.10
+sympy==1.13.3
+torch==2.4.1
+torchvision==0.19.1
+tqdm==4.67.1
+triton==3.0.0
+typing_extensions==4.13.2
+urllib3==2.2.3
+wheel==0.44.0
+nvidia-cublas-cu12==12.1.3.1
+nvidia-cuda-cupti-cu12==12.1.105
+nvidia-cuda-nvrtc-cu12==12.1.105
+nvidia-cuda-runtime-cu12==12.1.105
+nvidia-cudnn-cu12==9.1.0.70
+nvidia-cufft-cu12==11.0.2.54
+nvidia-curand-cu12==10.3.2.106
+nvidia-cusolver-cu12==11.4.5.107
+nvidia-cusparse-cu12==12.1.0.106
+nvidia-nccl-cu12==2.20.5
+nvidia-nvjitlink-cu12==12.8.93
+nvidia-nvtx-cu12==12.1.105"""
+    
+    # Write requirements to a temporary file
+    requirements_file = os.path.join(os.path.dirname(__file__), 'rife_requirements.txt')
+    with open(requirements_file, 'w') as f:
+        f.write(requirements_content)
+    
+    try:
+        print("Upgrading pip...")
+        subprocess.run([python_path, "-m", "pip", "install", "--upgrade", "pip==23.0.1"], check=True)
+        
+        print("Installing dependencies...")
+        subprocess.run([python_path, "-m", "pip", "install", "-r", requirements_file], check=True)
+        
+        # Clean up the temporary requirements file
+        os.remove(requirements_file)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Error installing RIFE dependencies: {e}")
+        if os.path.exists(requirements_file):
+            os.remove(requirements_file)
+        return False
 
 def process_frames(method='addWeighted'):
     print(f"Using interpolation method: {method}")
@@ -163,6 +313,8 @@ def process_frames(method='addWeighted'):
     rife_model = None
     
     if method == 'film':
+        from tensorflow_hub import hub
+        import tensorflow as tf
         print("Loading FILM model from TensorFlow Hub...")
         try:
             film_model = hub.load("https://tfhub.dev/google/film/1")
@@ -171,19 +323,15 @@ def process_frames(method='addWeighted'):
             print(f"Error loading FILM model: {e}")
             sys.exit(1)
     elif method == 'rife':
-        print("Loading RIFE model...")
-        try:
-            rife_model = RIFE()
-            print("RIFE model loaded successfully")
-        except Exception as e:
-            print(f"Error loading RIFE model: {e}")
-            sys.exit(1)
+        print("Using RIFE from ECCV2022-RIFE repository...")
+        # No need to load model as we're using the inference script directly
+        pass
 
     # Set the interpolation function
     if method == 'film':
         interpolate = lambda frame1, frame3: film_interpolation(frame1, frame3, film_model)
     elif method == 'rife':
-        interpolate = lambda frame1, frame3: rife_interpolation(frame1, frame3, rife_model)
+        interpolate = lambda frame1, frame3: rife_interpolation(frame1, frame3, None)
     else:
         interpolate = interpolation_methods[method]
 
@@ -256,6 +404,10 @@ if __name__ == "__main__":
     res_str = args.res  # Example: "1920x1080"
     res_parts = res_str.lower().split('x')
     generate_video = args.generate_video
+
+    if method == 'film':
+        import tensorflow as tf
+        import tensorflow_hub as hub
     
     if len(res_parts) != 2 or not all(p.isdigit() for p in res_parts):
         print("Resolution format should be like 1920x1080")
