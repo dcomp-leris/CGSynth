@@ -9,6 +9,9 @@ import venv
 import shutil
 import site
 from importlib import import_module
+import socket
+import time
+import tempfile
 
 
 # Find the repo root (assuming `.git` folder is present at the root)
@@ -313,8 +316,7 @@ def process_frames(method='addWeighted'):
     rife_model = None
     
     if method == 'film':
-        from tensorflow_hub import hub
-        import tensorflow as tf
+
         print("Loading FILM model from TensorFlow Hub...")
         try:
             film_model = hub.load("https://tfhub.dev/google/film/1")
@@ -331,7 +333,8 @@ def process_frames(method='addWeighted'):
     if method == 'film':
         interpolate = lambda frame1, frame3: film_interpolation(frame1, frame3, film_model)
     elif method == 'rife':
-        interpolate = lambda frame1, frame3: rife_interpolation(frame1, frame3, None)
+        rife_temp_dir = "/tmp/rife_temp"  # or any temp dir you like
+        interpolate = lambda frame1, frame3: rife_interpolate_client(frame1, frame3, rife_temp_dir)
     else:
         interpolate = interpolation_methods[method]
 
@@ -374,6 +377,56 @@ def process_frames(method='addWeighted'):
     cv2.imwrite(last_frame_dest, last_frame)
     print(f"Saved last original frame: {last_frame_dest}")
 
+def start_rife_server(rife_venv_path, rife_repo_path):
+    # Start the server in the RIFE venv
+    server_script = os.path.join(rife_repo_path, "rife_server.py")
+    cmd = f'source "{rife_venv_path}/bin/activate"; python "{server_script}"'
+    # Start in a new process
+    proc = subprocess.Popen(['/bin/bash', '-c', cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # Wait for "READY"
+    while True:
+        line = proc.stdout.readline()
+        if b"READY" in line:
+            break
+        if proc.poll() is not None:
+            raise RuntimeError("RIFE server failed to start")
+    return proc
+
+def rife_interpolate_client(frame1, frame3, rife_temp_dir, output_path=None):
+    """
+    Sends two frames to the RIFE server for interpolation.
+    frame1, frame3: numpy arrays (BGR, as from cv2)
+    rife_temp_dir: directory to store temp input/output images
+    output_path: if None, will use a temp file in rife_temp_dir
+    Returns: interpolated frame as numpy array (BGR)
+    """
+    os.makedirs(rife_temp_dir, exist_ok=True)
+    frame1_path = os.path.join(rife_temp_dir, 'frame1.png')
+    frame3_path = os.path.join(rife_temp_dir, 'frame3.png')
+    if output_path is None:
+        output_path = os.path.join(rife_temp_dir, 'interpolated.png')
+
+    cv2.imwrite(frame1_path, frame1)
+    cv2.imwrite(frame3_path, frame3)
+
+    # Communicate with the server
+    with socket.create_connection(('localhost', 50051)) as sock:
+        msg = f"{frame1_path}|{frame3_path}|{output_path}\n"
+        sock.sendall(msg.encode())
+        response = sock.recv(1024).decode()
+        if not response.startswith("OK"):
+            raise RuntimeError(f"RIFE server error: {response}")
+
+    # Read the interpolated frame
+    interpolated_frame = cv2.imread(output_path)
+    if interpolated_frame is None:
+        raise RuntimeError(f"Failed to read interpolated frame from {output_path}")
+
+    return interpolated_frame
+
+def stop_rife_server():
+    with socket.create_connection(('localhost', 50051)) as sock:
+        sock.sendall(b"EXIT\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Frame Interpolation Script')
@@ -408,6 +461,7 @@ if __name__ == "__main__":
     if method == 'film':
         import tensorflow as tf
         import tensorflow_hub as hub
+        import numpy as np
     
     if len(res_parts) != 2 or not all(p.isdigit() for p in res_parts):
         print("Resolution format should be like 1920x1080")
@@ -469,6 +523,7 @@ if __name__ == "__main__":
         os.chmod(processed_folder, 0o777)
 
     if method == 'film':
+        
         gpus = tf.config.experimental.list_physical_devices('GPU')
         if gpus:
             try:
@@ -520,6 +575,3 @@ if __name__ == "__main__":
             print(f"Error during video generation: {e}")
     else:
         print("Video generation skipped. Use --generate_video flag to create videos.")
-
-    #create_video_from_frames(original_folder, output_path='original_video.mp4')
-    #create_video_from_frames(processed_folder, output_path='interpolated_video_{}.mp4'.format(method))
