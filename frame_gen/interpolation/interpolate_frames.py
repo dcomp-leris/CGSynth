@@ -12,7 +12,16 @@ from importlib import import_module
 import socket
 import time
 import tempfile
+import numpy as np
+import logging
 
+# Add the RIFE submodule to the Python path
+RIFE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'ECCV2022-RIFE')
+sys.path.append(RIFE_PATH)
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Find the repo root (assuming `.git` folder is present at the root)
 def get_repo_root():
@@ -313,10 +322,9 @@ def process_frames(method='addWeighted'):
 
     # Load models if needed
     film_model = None
-    rife_model = None
+    rife_server = None
     
     if method == 'film':
-
         print("Loading FILM model from TensorFlow Hub...")
         try:
             film_model = hub.load("https://tfhub.dev/google/film/1")
@@ -325,15 +333,19 @@ def process_frames(method='addWeighted'):
             print(f"Error loading FILM model: {e}")
             sys.exit(1)
     elif method == 'rife':
-        print("Using RIFE from ECCV2022-RIFE repository...")
-        # No need to load model as we're using the inference script directly
-        pass
+        print("Starting RIFE server...")
+        try:
+            rife_server = start_rife_server()
+            print("RIFE server started successfully")
+        except Exception as e:
+            print(f"Error starting RIFE server: {e}")
+            sys.exit(1)
 
     # Set the interpolation function
     if method == 'film':
         interpolate = lambda frame1, frame3: film_interpolation(frame1, frame3, film_model)
     elif method == 'rife':
-        rife_temp_dir = "/tmp/rife_temp"  # or any temp dir you like
+        rife_temp_dir = os.path.join(os.path.dirname(__file__), 'rife_temp')
         interpolate = lambda frame1, frame3: rife_interpolate_client(frame1, frame3, rife_temp_dir)
     else:
         interpolate = interpolation_methods[method]
@@ -377,54 +389,79 @@ def process_frames(method='addWeighted'):
     cv2.imwrite(last_frame_dest, last_frame)
     print(f"Saved last original frame: {last_frame_dest}")
 
-def start_rife_server(rife_venv_path, rife_repo_path):
-    # Start the server in the RIFE venv
-    server_script = os.path.join(rife_repo_path, "rife_server.py")
-    cmd = f'source "{rife_venv_path}/bin/activate"; python "{server_script}"'
-    # Start in a new process
-    proc = subprocess.Popen(['/bin/bash', '-c', cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    # Wait for "READY"
-    while True:
-        line = proc.stdout.readline()
-        if b"READY" in line:
-            break
-        if proc.poll() is not None:
-            raise RuntimeError("RIFE server failed to start")
-    return proc
+    # Clean up
+    if method == 'rife' and rife_server:
+        print("Stopping RIFE server...")
+        stop_rife_server()
+        rife_server.terminate()
+        rife_server.wait()
 
-def rife_interpolate_client(frame1, frame3, rife_temp_dir, output_path=None):
-    """
-    Sends two frames to the RIFE server for interpolation.
-    frame1, frame3: numpy arrays (BGR, as from cv2)
-    rife_temp_dir: directory to store temp input/output images
-    output_path: if None, will use a temp file in rife_temp_dir
-    Returns: interpolated frame as numpy array (BGR)
-    """
-    os.makedirs(rife_temp_dir, exist_ok=True)
-    frame1_path = os.path.join(rife_temp_dir, 'frame1.png')
-    frame3_path = os.path.join(rife_temp_dir, 'frame3.png')
-    if output_path is None:
-        output_path = os.path.join(rife_temp_dir, 'interpolated.png')
+def start_rife_server():
+    """Start the RIFE server from the submodule."""
+    try:
+        # Import the server from the submodule
+        from rife_server import main as rife_server_main
+        
+        # Start the server in a separate process
+        server_process = subprocess.Popen(
+            [sys.executable, os.path.join(RIFE_PATH, 'rife_server.py')],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        # Wait for server to start
+        time.sleep(2)
+        return server_process
+    except Exception as e:
+        logger.error(f"Failed to start RIFE server: {e}")
+        return None
 
+def rife_interpolate_client(frame1, frame3, temp_dir):
+    """
+    Send frames to RIFE server for interpolation.
+    Returns the interpolated frame.
+    """
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    # Save frames to temp files
+    frame1_path = os.path.join(temp_dir, 'frame1.png')
+    frame3_path = os.path.join(temp_dir, 'frame3.png')
+    output_path = os.path.join(temp_dir, 'interpolated.png')
+    
     cv2.imwrite(frame1_path, frame1)
     cv2.imwrite(frame3_path, frame3)
-
-    # Communicate with the server
-    with socket.create_connection(('localhost', 50051)) as sock:
-        msg = f"{frame1_path}|{frame3_path}|{output_path}\n"
-        sock.sendall(msg.encode())
-        response = sock.recv(1024).decode()
-        if not response.startswith("OK"):
-            raise RuntimeError(f"RIFE server error: {response}")
-
-    # Read the interpolated frame
-    interpolated_frame = cv2.imread(output_path)
-    if interpolated_frame is None:
-        raise RuntimeError(f"Failed to read interpolated frame from {output_path}")
-
-    return interpolated_frame
+    
+    # Try to connect with retries
+    max_retries = 3
+    retry_delay = 1
+    
+    for i in range(max_retries):
+        try:
+            # Connect to server and send request
+            with socket.create_connection(('localhost', 50051), timeout=5) as sock:
+                msg = f"{frame1_path}|{frame3_path}|{output_path}\n"
+                sock.sendall(msg.encode())
+                response = sock.recv(1024).decode()
+                
+                if not response.startswith("OK"):
+                    raise RuntimeError(f"RIFE server error: {response}")
+                
+                # Read and return interpolated frame
+                interpolated_frame = cv2.imread(output_path)
+                if interpolated_frame is None:
+                    raise RuntimeError(f"Failed to read interpolated frame from {output_path}")
+                
+                return interpolated_frame
+                
+        except (ConnectionRefusedError, socket.timeout) as e:
+            if i < max_retries - 1:
+                print(f"Connection attempt {i+1} failed, retrying...")
+                time.sleep(retry_delay)
+            else:
+                raise RuntimeError(f"Failed to connect to RIFE server after {max_retries} attempts: {e}")
 
 def stop_rife_server():
+    """Send exit command to RIFE server."""
     with socket.create_connection(('localhost', 50051)) as sock:
         sock.sendall(b"EXIT\n")
 
