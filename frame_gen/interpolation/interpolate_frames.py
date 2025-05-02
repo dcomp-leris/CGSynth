@@ -310,6 +310,72 @@ nvidia-nvtx-cu12==12.1.105"""
             os.remove(requirements_file)
         return False
 
+def start_film_server():
+    """Start the FILM server."""
+    try:
+        # Start the server in a separate process
+        server_process = subprocess.Popen(
+            [sys.executable, os.path.join(os.path.dirname(__file__), 'film_server.py')],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        # Wait for server to start
+        time.sleep(2)
+        return server_process
+    except Exception as e:
+        logger.error(f"Failed to start FILM server: {e}")
+        return None
+
+def film_interpolate_client(frame1, frame2, temp_dir):
+    """
+    Send frames to FILM server for interpolation.
+    Returns the interpolated frame.
+    """
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    # Save frames to temp files
+    frame1_path = os.path.join(temp_dir, 'frame1.png')
+    frame2_path = os.path.join(temp_dir, 'frame2.png')
+    output_path = os.path.join(temp_dir, 'interpolated.png')
+    
+    cv2.imwrite(frame1_path, frame1)
+    cv2.imwrite(frame2_path, frame2)
+    
+    # Try to connect with retries
+    max_retries = 3
+    retry_delay = 1
+    
+    for i in range(max_retries):
+        try:
+            # Connect to server and send request
+            with socket.create_connection(('localhost', 50052), timeout=5) as sock:
+                msg = f"{frame1_path}|{frame2_path}|{output_path}\n"
+                sock.sendall(msg.encode())
+                response = sock.recv(1024).decode()
+                
+                if not response.startswith("OK"):
+                    raise RuntimeError(f"FILM server error: {response}")
+                
+                # Read and return interpolated frame
+                interpolated_frame = cv2.imread(output_path)
+                if interpolated_frame is None:
+                    raise RuntimeError(f"Failed to read interpolated frame from {output_path}")
+                
+                return interpolated_frame
+                
+        except (ConnectionRefusedError, socket.timeout) as e:
+            if i < max_retries - 1:
+                print(f"Connection attempt {i+1} failed, retrying...")
+                time.sleep(retry_delay)
+            else:
+                raise RuntimeError(f"Failed to connect to FILM server after {max_retries} attempts: {e}")
+
+def stop_film_server():
+    """Send exit command to FILM server."""
+    with socket.create_connection(('localhost', 50052)) as sock:
+        sock.sendall(b"EXIT\n")
+
 def process_frames(method='addWeighted'):
     print(f"Using interpolation method: {method}")
 
@@ -321,16 +387,16 @@ def process_frames(method='addWeighted'):
     }
 
     # Load models if needed
-    film_model = None
+    film_server = None
     rife_server = None
     
     if method == 'film':
-        print("Loading FILM model from TensorFlow Hub...")
+        print("Starting FILM server...")
         try:
-            film_model = hub.load("https://tfhub.dev/google/film/1")
-            print("FILM model loaded successfully")
+            film_server = start_film_server()
+            print("FILM server started successfully")
         except Exception as e:
-            print(f"Error loading FILM model: {e}")
+            print(f"Error starting FILM server: {e}")
             sys.exit(1)
     elif method == 'rife':
         print("Starting RIFE server...")
@@ -343,10 +409,11 @@ def process_frames(method='addWeighted'):
 
     # Set the interpolation function
     if method == 'film':
-        interpolate = lambda frame1, frame3: film_interpolation(frame1, frame3, film_model)
+        film_temp_dir = os.path.join(os.path.dirname(__file__), 'film_temp')
+        interpolate = lambda frame1, frame2: film_interpolate_client(frame1, frame2, film_temp_dir)
     elif method == 'rife':
         rife_temp_dir = os.path.join(os.path.dirname(__file__), 'rife_temp')
-        interpolate = lambda frame1, frame3: rife_interpolate_client(frame1, frame3, rife_temp_dir)
+        interpolate = lambda frame1, frame2: rife_interpolate_client(frame1, frame2, rife_temp_dir)
     else:
         interpolate = interpolation_methods[method]
 
@@ -390,7 +457,12 @@ def process_frames(method='addWeighted'):
     print(f"Saved last original frame: {last_frame_dest}")
 
     # Clean up
-    if method == 'rife' and rife_server:
+    if method == 'film' and film_server:
+        print("Stopping FILM server...")
+        stop_film_server()
+        film_server.terminate()
+        film_server.wait()
+    elif method == 'rife' and rife_server:
         print("Stopping RIFE server...")
         stop_rife_server()
         rife_server.terminate()
