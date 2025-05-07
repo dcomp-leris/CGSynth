@@ -173,8 +173,6 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# Pcap file
+# Pcap file and video file
 /rtp_stream_creation/*.pcap
-
-# Images extracted from pcap files
-/rtp_stream_creation/extracted_frames/*
+/rtp_stream_creation/*.mp4
