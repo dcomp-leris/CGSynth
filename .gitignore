@@ -176,3 +176,16 @@ cython_debug/
 # Pcap file and video file
 /rtp_stream_creation/*.pcap
 /rtp_stream_creation/*.mp4
+
+# Frame generation temporary files and caches
+# First, ignore all image files in frame_gen
+frame_gen/**/*.png
+frame_gen/**/*.jpg
+frame_gen/**/*.jpeg
+frame_gen/**/*.PNG
+frame_gen/**/*.JPG
+frame_gen/**/*.JPEG
+
+# Then, explicitly un-ignore the original_frames directory
+!frame_gen/original_frames/
+!frame_gen/original_frames/**
