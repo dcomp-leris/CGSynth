@@ -24,7 +24,7 @@ A comprehensive toolkit for frame generation, degradation simulation, and qualit
 This project uses different Python versions for different interpolation methods:
 
 - **RIFE**: Python 3.8.20
-- **FILM**: Python 3.12.2
+- **FILM**: Python 3.8.20
 
 ### Setup Virtual Environments
 
@@ -35,8 +35,8 @@ source venv_rife/bin/activate  # On Linux/Mac
 # or
 .\venv_rife\Scripts\activate  # On Windows
 
-# For FILM (Python 3.12.2)
-python3.12 -m venv venv_film
+# For FILM (Python 3.8.20)
+python3.8 -m venv venv_film
 source venv_film/bin/activate  # On Linux/Mac
 # or
 .\venv_film\Scripts\activate  # On Windows
@@ -53,7 +53,7 @@ cd frame_gen
 pip install -e .
 
 # Install with specific interpolation methods
-pip install -e ".[film]"    # For FILM interpolation (Python 3.12.2)
+pip install -e ".[film]"    # For FILM interpolation (Python 3.8.20)
 pip install -e ".[rife]"    # For RIFE interpolation (Python 3.8.20)
 pip install -e ".[metrics]" # For quality metrics
 
@@ -72,7 +72,7 @@ pip install -e ".[dev]"
   - matplotlib
   - seaborn
 
-- **FILM Interpolation** (Python 3.12.2, install with `.[film]`):
+- **FILM Interpolation** (Python 3.8.20, install with `.[film]`):
   - tensorflow==2.6.2
   - tensorflow-datasets==4.4.0
   - tensorflow-addons==0.15.0
@@ -163,7 +163,7 @@ degraded_frames = degrader.process_frames(original_frames, profile)
 ### Frame Interpolation
 
 ```python
-# For FILM interpolation (Python 3.12.2)
+# For FILM interpolation (Python 3.8.20)
 from frame_gen.src.interpolation import FILMInterpolator
 film = FILMInterpolator()
 interpolated_frames = film.interpolate(frames, target_fps=60)

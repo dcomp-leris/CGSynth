@@ -1,5 +1,13 @@
 # CGReplay
 
+## Setup
+
+### Submodules
+This project uses Git submodules. To properly initialize them, run:
+
+```bash
+git submodule update --init
+```
 
 # RTP Video Tools
 

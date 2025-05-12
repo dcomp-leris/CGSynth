@@ -100,17 +100,26 @@ def process_request(frame1_path, frame2_path, output_path):
     """Process interpolation request using FILM."""
     try:
         # Read input frames
+        logger.info(f"Attempting to read frame1 from: {frame1_path}")
         frame1 = cv2.imread(frame1_path)
+        if frame1 is None:
+            logger.error(f"Failed to read frame1 from {frame1_path}")
+            return "ERROR: Failed to read frame1"
+            
+        logger.info(f"Attempting to read frame2 from: {frame2_path}")
         frame2 = cv2.imread(frame2_path)
+        if frame2 is None:
+            logger.error(f"Failed to read frame2 from {frame2_path}")
+            return "ERROR: Failed to read frame2"
         
-        if frame1 is None or frame2 is None:
-            return "ERROR: Failed to read input frames"
+        logger.info(f"Successfully read both frames. Frame1 shape: {frame1.shape}, Frame2 shape: {frame2.shape}")
         
         # Run interpolation
         film = FILMInference()
         interpolated_frame = film.interpolate(frame1, frame2)
         
         # Save result
+        logger.info(f"Saving interpolated frame to: {output_path}")
         cv2.imwrite(output_path, interpolated_frame)
         return "OK"
         

@@ -590,11 +590,6 @@ if __name__ == "__main__":
     res_str = args.res  # Example: "1920x1080"
     res_parts = res_str.lower().split('x')
     generate_video = args.generate_video
-
-    if method == 'film':
-        import tensorflow as tf
-        import tensorflow_hub as hub
-        import numpy as np
     
     if len(res_parts) != 2 or not all(p.isdigit() for p in res_parts):
         print("Resolution format should be like 1920x1080")
@@ -653,19 +648,7 @@ if __name__ == "__main__":
 
     if not os.path.exists(processed_folder):
         os.makedirs(processed_folder)
-        os.chmod(processed_folder, 0o777)
-
-    if method == 'film':
-        
-        gpus = tf.config.experimental.list_physical_devices('GPU')
-        if gpus:
-            try:
-                for gpu in gpus:
-                    tf.config.experimental.set_memory_growth(gpu, True)
-            except RuntimeError as e:
-                print(f"Memory growth setting error: {e}")
-        tf.config.threading.set_inter_op_parallelism_threads(1)
-        tf.config.threading.set_intra_op_parallelism_threads(1)
+        os.chmod(processed_folder, 0o555)
 
     process_frames(method=method)
 
