@@ -10,7 +10,7 @@ A comprehensive toolkit for frame generation, degradation simulation, and qualit
   - Configurable degradation profiles
 
 - **Frame Interpolation**
-  - AI-based methods (RIFE, FILM)
+  - AI-based methods (RIFE)
   - Traditional methods (simple blending)
   - Support for different resolutions and frame rates
 
@@ -24,7 +24,6 @@ A comprehensive toolkit for frame generation, degradation simulation, and qualit
 This project uses different Python versions for different interpolation methods:
 
 - **RIFE**: Python 3.8.20
-- **FILM**: Python 3.8.20
 
 ### Setup Virtual Environments
 
@@ -34,12 +33,6 @@ python3.8 -m venv venv_rife
 source venv_rife/bin/activate  # On Linux/Mac
 # or
 .\venv_rife\Scripts\activate  # On Windows
-
-# For FILM (Python 3.8.20)
-python3.8 -m venv venv_film
-source venv_film/bin/activate  # On Linux/Mac
-# or
-.\venv_film\Scripts\activate  # On Windows
 ```
 
 ### Install the Package
@@ -53,7 +46,6 @@ cd frame_gen
 pip install -e .
 
 # Install with specific interpolation methods
-pip install -e ".[film]"    # For FILM interpolation (Python 3.8.20)
 pip install -e ".[rife]"    # For RIFE interpolation (Python 3.8.20)
 pip install -e ".[metrics]" # For quality metrics
 
@@ -71,21 +63,6 @@ pip install -e ".[dev]"
   - pandas
   - matplotlib
   - seaborn
-
-- **FILM Interpolation** (Python 3.8.20, install with `.[film]`):
-  - tensorflow==2.6.2
-  - tensorflow-datasets==4.4.0
-  - tensorflow-addons==0.15.0
-  - absl-py==0.12.0
-  - gin-config==0.5.0
-  - parameterized==0.8.1
-  - mediapy==1.0.3
-  - scikit-image==0.19.1
-  - apache-beam==2.34.0
-  - google-cloud-bigquery-storage==1.1.0
-  - natsort==8.1.0
-  - gdown==4.5.4
-  - tqdm==4.64.1
 
 - **RIFE Interpolation** (Python 3.8.20, install with `.[rife]`):
   - torch>=1.7.0
@@ -163,11 +140,6 @@ degraded_frames = degrader.process_frames(original_frames, profile)
 ### Frame Interpolation
 
 ```python
-# For FILM interpolation (Python 3.8.20)
-from frame_gen.src.interpolation import FILMInterpolator
-film = FILMInterpolator()
-interpolated_frames = film.interpolate(frames, target_fps=60)
-
 # For RIFE interpolation (Python 3.8.20)
 from frame_gen.src.interpolation import RIFEInterpolator
 rife = RIFEInterpolator()

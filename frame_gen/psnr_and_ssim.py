@@ -21,7 +21,7 @@ method = 'interpolation'
 # comparison_folder = os.path.join(current_dir, method, 'upscaled_original_frames_from_1280_720_to_1920_1080')
 
 original_folder = os.path.join(current_dir, method, 'downscaled_original_frames_from_1920_1080_to_1280_720')
-comparison_folder = os.path.join(current_dir, method, 'processed_frames_film_1280_720')
+comparison_folder = os.path.join(current_dir, method, 'processed_frames_rife_1280_720')
 
 # Get the list of files in both folders
 original_files = sorted(os.listdir(original_folder))

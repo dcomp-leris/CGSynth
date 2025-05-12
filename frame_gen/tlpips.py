@@ -11,7 +11,7 @@ from datetime import datetime
 
 # === CONFIG ===
 original_folder = 'interpolation/downscaled_original_frames_from_1920_1080_to_1280_720'
-comparison_folder = 'interpolation/processed_frames_film_1280_720'
+comparison_folder = 'interpolation/processed_frames_rife_1280_720'
 timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 
 # === Set device ===

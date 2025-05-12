@@ -1,7 +1,7 @@
 # Interpolation Methods
 In this section, we explore some possible methods with/without AI to interpolate frames
 
-More specifically, we leverage existing methods such as FILM to interpolate frames
+More specifically, we leverage existing methods such as RIFE to interpolate frames
 
 ## Requirements
 We need to install FILM. To do that, we recommend to leverage the existing docker container image:
