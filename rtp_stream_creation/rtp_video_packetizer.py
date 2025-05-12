@@ -57,6 +57,9 @@ def encode_image_to_nalus(img_path, codec="h264"):
             "-c:v", codec,
             "-profile:v", "main",
             "-preset", "medium",
+            "-b:v", "1000k",
+            "-maxrate", "2000k",
+            "-bufsize", "3000k",
             "-f", "rawvideo", encoded_path
         ], check=True)
 
@@ -143,9 +146,11 @@ def packetize_h264_nalu(nalu, seq, timestamp, ssrc, marker=0):
 def create_rtp_packets(codec="h264"):
     """
     Reads PNG frames, encodes them to NALUs, and writes RTP packets to PCAP.
+    Uses inter-packet intervals from a file to calculate RTP timestamps.
     """
     base_path = Path(__file__).parent
-    img_dir = base_path.parent / "frame_gen" / "original_frames" / "mortal_kombat_11" / "1920_1080"
+    img_dir = base_path.parent / "frame_gen" / "interpolation" / "downscaled_original_frames_from_1920_1080_to_1280_720"
+    ipi_file = base_path.parent / "rtp_stream_creation" / "all_packets.txt"
     output_pcap = f"rtp_stream_{codec}.pcap"
 
     server_ip = "192.168.0.10"
@@ -157,7 +162,7 @@ def create_rtp_packets(codec="h264"):
 
     ssrc = 12345
     seq = 0
-    timestamp = 1000
+    timestamp = 0
     all_packets = []
 
     commands = read_commands()
@@ -166,29 +171,69 @@ def create_rtp_packets(codec="h264"):
         print(f"Image directory {img_dir} does not exist.")
         return
 
+    if not ipi_file.exists():
+        print(f"IPI file {ipi_file} does not exist.")
+        return
+
+    # Read IPIs from file
+    ipis = []
+    with ipi_file.open("r") as f:
+        reader = csv.reader(f)
+        next(reader)  # Skip header
+        for row in reader:
+            try:
+                ipi = float(row[0]) / 100000  # Convert to seconds
+                ipis.append(ipi)
+            except Exception as e:
+                print("Skipping invalid row:", row, "-", e)
+
     image_files = sorted(img_dir.glob("*.png"))
     print(f"Found {len(image_files)} PNG files.")
 
-    for frame_index, img_path in enumerate(image_files, start=1):
-        print(f"Encoding frame {frame_index}: {img_path.name}")
+    if len(ipis) < len(image_files):
+        print(f"Warning: Not enough IPI values ({len(ipis)}) for {len(image_files)} frames.")
+        return
+
+    rtp_clock_rate = 90000  # Hz
+
+    for frame_index, (img_path, ipi) in enumerate(zip(image_files, ipis), start=1):
+        print(f"Encoding frame {frame_index}: {img_path.name} with IPI={ipi:.6f} seconds")
         nal_units = encode_image_to_nalus(img_path, codec=codec)
 
         for idx, nalu in enumerate(nal_units):
             marker = 1 if idx == len(nal_units) - 1 else 0
-            rtp_packets = packetize_h264_nalu(nalu, seq, timestamp, ssrc, marker)
+            rtp_packets = packetize_h264_nalu(nalu, seq, int(timestamp), ssrc, marker)
             for rtp, new_seq in rtp_packets:
                 ip = IP(src=server_ip, dst=user_ip)
                 udp = UDP(sport=server_port, dport=user_port)
                 eth = Ether(src=server_mac, dst=user_mac)
                 full_packet = eth / ip / udp / rtp
                 all_packets.append(full_packet)
+                old_seq = seq
                 seq = new_seq
 
-        timestamp += 3000  # Fixed timestamp increment
+        # Increment timestamp based on IPI
+        timestamp += ipi * rtp_clock_rate  # Convert seconds to RTP timestamp units
+        
+        if frame_index in commands:
+            for command in commands[frame_index]:
+                # Use a distinct payload type for command RTP packets (e.g., 97)
+                rtp_command = RTP(
+                    version=2, padding=0, extension=0, marker=1,
+                    payload_type=97, sequence=old_seq % 65536,
+                    timestamp=int(timestamp), sourcesync=ssrc
+                ) / Raw(load=command.encode())
+
+                ip = IP(src=user_ip, dst=server_ip)
+                udp = UDP(sport=user_port, dport=server_port)
+                eth = Ether(src=user_mac, dst=server_mac)
+                full_packet = eth / ip / udp / rtp_command
+                all_packets.append(full_packet)
+
+                print(f"Executing command for frame {frame_index}: {command}")
 
     print(f"Writing {len(all_packets)} packets to {output_pcap}")
     wrpcap(output_pcap, all_packets)
-
 
 if __name__ == "__main__":
     create_rtp_packets(codec="h264")
