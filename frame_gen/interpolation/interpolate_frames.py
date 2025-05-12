@@ -34,26 +34,50 @@ def get_repo_root():
 
 def create_video_from_frames(frame_folder, output_path='output_video.mp4', fps=30):
     """
-    Uses ffmpeg to create a video from PNG frames.
+    Generates a video from the frames in the specified folder.
+    
+    Args:
+        frame_folder: Path to the folder containing frames
+        output_path: Path where the video will be saved
+        fps: Frames per second for the output video
+    
+    Returns:
+        bool: True if video generation was successful, False otherwise
     """
-    print("Creating video with ffmpeg...")
-
-    # Construct the ffmpeg command
-    ffmpeg_cmd = [
-        'ffmpeg',
-        '-y',  # Overwrite if output file exists
-        '-framerate', str(fps),
-        '-i', os.path.join(frame_folder, '%04d.png'),
-        '-c:v', 'libx264',
-        '-pix_fmt', 'yuv420p',
-        output_path
-    ]
-
+    print(f"Generating video from {frame_folder} at {fps} fps...")
+    
     try:
-        subprocess.run(ffmpeg_cmd, check=True)
-        print(f"Video saved to {output_path}")
-    except subprocess.CalledProcessError as e:
-        print("Error during ffmpeg execution:", e)
+        # Try to import the function from src module
+        try:
+            src_path = os.path.join(get_repo_root(), "frame_gen", "src")
+            if src_path not in sys.path:
+                sys.path.append(src_path)
+            
+            from src.utils.video_utils import create_video_from_frames as src_create_video
+            src_create_video(frames_dir=frame_folder, output_video=output_path, fps=fps, codec="libx264")
+            print(f"Video successfully saved to {output_path} using src module")
+            return True
+        except ImportError:
+            # Fall back to direct ffmpeg method
+            print("Could not import from src module, using direct ffmpeg command...")
+            
+            # Construct the ffmpeg command
+            ffmpeg_cmd = [
+                'ffmpeg',
+                '-y',  # Overwrite if output file exists
+                '-framerate', str(fps),
+                '-i', os.path.join(frame_folder, '%04d.png'),
+                '-c:v', 'libx264',
+                '-pix_fmt', 'yuv420p',
+                output_path
+            ]
+            
+            subprocess.run(ffmpeg_cmd, check=True)
+            print(f"Video successfully saved to {output_path}")
+            return True
+    except Exception as e:
+        print(f"Error during video generation: {e}")
+        return False
 
 def addWeighted_interpolation(frame1, frame3):
     """
@@ -650,37 +674,14 @@ if __name__ == "__main__":
     if generate_video:
         print("Generating videos from frames...")
         
-        frame_gen_base_path = os.path.join(repo_root, "frame_gen")
-        # Path to create_video_from_frames.py script at repo root
-        create_video_script = os.path.join(frame_gen_base_path, "create_video_from_frames.py")
-        
-        # Call the script for original and processed frames using positional argument for frame_folder
-        # and --output/--fps for the named arguments
-        original_video_cmd = [
-            sys.executable,
-            create_video_script,
-            original_folder,  # First positional argument
-            "--output", "original_video.mp4",
-            "--fps", "30"
-        ]
-        
-        processed_video_cmd = [
-            sys.executable,
-            create_video_script,
-            processed_folder,  # First positional argument
-            "--output", f"interpolated_video_{method}.mp4",
-            "--fps", "30"
-        ]
-        
-        try:
-            print("Generating original video...")
-            subprocess.run(original_video_cmd, check=True)
+        # Generate video from original frames
+        original_video_path = os.path.join(os.path.dirname(original_folder), "original_video.mp4")
+        if create_video_from_frames(original_folder, original_video_path, fps=30):
+            print(f"Original video saved to {original_video_path}")
             
-            print("Generating interpolated video...")
-            subprocess.run(processed_video_cmd, check=True)
-            
-            print("Video generation completed.")
-        except subprocess.CalledProcessError as e:
-            print(f"Error during video generation: {e}")
+        # Generate video from processed frames
+        processed_video_path = os.path.join(os.path.dirname(processed_folder), f"interpolated_video_{method}.mp4")
+        if create_video_from_frames(processed_folder, processed_video_path, fps=30):
+            print(f"Processed video saved to {processed_video_path}")
     else:
         print("Video generation skipped. Use --generate_video flag to create videos.")

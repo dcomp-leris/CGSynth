@@ -73,37 +73,19 @@ pip install -e ".[dev]"
   - seaborn
 
 - **FILM Interpolation** (Python 3.12.2, install with `.[film]`):
-  - tensorflow>=2.15.0
-  - tensorflow-hub>=0.15.0
-  - tensorflow-io-gcs-filesystem>=0.31.0
-  - tensorflow-estimator>=2.15.0
-  - tensorflow-text>=2.15.0
-  - tensorflow-datasets>=4.15.0
-  - tensorflow-metadata>=1.14.0
-  - tensorflow-probability>=0.23.0
-  - tensorflow-recommenders>=0.7.3
-  - tensorflow-transform>=1.15.0
-  - tensorflow-model-optimization>=0.7.5
-  - tensorflow-addons>=0.21.0
-  - tensorflow-io>=0.31.0
-  - tensorflow-serving-api>=2.15.0
-  - tensorflow-gpu>=2.15.0
-  - tensorflow-cpu>=2.15.0
-  - tensorflow-macos>=2.15.0
-  - tensorflow-metal>=1.1.0
-  - tensorflow-aarch64>=2.15.0
-  - tensorflow-rocm>=2.15.0
-  - tensorflow-gpu-configs>=2.15.0
-  - tensorflow-gpu-deps>=2.15.0
-  - tensorflow-gpu-deps-cuda>=2.15.0
-  - tensorflow-gpu-deps-cudnn>=2.15.0
-  - tensorflow-gpu-deps-tensorrt>=2.15.0
-  - tensorflow-gpu-deps-nccl>=2.15.0
-  - tensorflow-gpu-deps-cublas>=2.15.0
-  - tensorflow-gpu-deps-cufft>=2.15.0
-  - tensorflow-gpu-deps-curand>=2.15.0
-  - tensorflow-gpu-deps-cusolver>=2.15.0
-  - tensorflow-gpu-deps-cusparse>=2.15.0
+  - tensorflow==2.6.2
+  - tensorflow-datasets==4.4.0
+  - tensorflow-addons==0.15.0
+  - absl-py==0.12.0
+  - gin-config==0.5.0
+  - parameterized==0.8.1
+  - mediapy==1.0.3
+  - scikit-image==0.19.1
+  - apache-beam==2.34.0
+  - google-cloud-bigquery-storage==1.1.0
+  - natsort==8.1.0
+  - gdown==4.5.4
+  - tqdm==4.64.1
 
 - **RIFE Interpolation** (Python 3.8.20, install with `.[rife]`):
   - torch>=1.7.0
@@ -130,18 +112,31 @@ pip install -e ".[dev]"
 
 ```
 frame_gen/
-├── src/
-│   ├── degradation/     # Frame degradation simulation
-│   ├── interpolation/   # Frame interpolation methods
-│   ├── metrics/        # Quality assessment metrics
-│   └── utils/          # Utility functions
-├── tests/              # Unit tests
-├── config/             # Configuration files
-├── data/               # Data directory
-│   ├── raw/           # Original frames/videos
-│   ├── processed/     # Processed frames/videos
-│   └── results/       # Analysis results
-└── notebooks/         # Jupyter notebooks for analysis
+├── config/                   # Configuration files
+├── data/                     # Data directory
+│   ├── original_frames/      # Original video frames
+│   │   └── mortal_kombat_11/
+│   │       └── 1920_1080/
+│   └── processed/            # Processed frames/videos
+├── interpolation/            # Interpolation intermediate files 
+│   ├── downscaled_original_frames_from_1920_1080_to_1280_720/
+│   ├── upscaled_original_frames_from_1280_720_to_1920_1080/
+│   ├── models/               # Model weights and configurations
+│   └── temp/                 # Temporary files
+│       ├── frames/           # Temporary frame storage
+│       └── rife/             # RIFE temporary files
+├── results/                  # Output results
+│   ├── metrics/              # Metric calculation results
+│   └── videos/               # Generated videos
+├── plots/                    # Visualization outputs
+├── src/                      # Source code
+│   ├── degradation/          # Frame degradation simulation
+│   ├── interpolation/        # Frame interpolation methods
+│   ├── metrics/              # Quality assessment metrics
+│   ├── evaluation/           # Evaluation code
+│   ├── models/               # Model implementations
+│   └── utils/                # Utility functions
+└── tests/                    # Unit tests
 ```
 
 ## Usage
@@ -149,7 +144,7 @@ frame_gen/
 ### Frame Degradation
 
 ```python
-from frame_gen.degradation import CloudGamingNoise
+from frame_gen.src.degradation import CloudGamingNoise
 
 # Initialize the degradation simulator
 degrader = CloudGamingNoise(seed=42)
@@ -169,12 +164,12 @@ degraded_frames = degrader.process_frames(original_frames, profile)
 
 ```python
 # For FILM interpolation (Python 3.12.2)
-from frame_gen.interpolation import FILMInterpolator
+from frame_gen.src.interpolation import FILMInterpolator
 film = FILMInterpolator()
 interpolated_frames = film.interpolate(frames, target_fps=60)
 
 # For RIFE interpolation (Python 3.8.20)
-from frame_gen.interpolation import RIFEInterpolator
+from frame_gen.src.interpolation import RIFEInterpolator
 rife = RIFEInterpolator()
 interpolated_frames = rife.interpolate(frames, target_fps=60)
 ```
@@ -182,7 +177,7 @@ interpolated_frames = rife.interpolate(frames, target_fps=60)
 ### Quality Assessment
 
 ```python
-from frame_gen.metrics import QualityMetrics
+from frame_gen.src.metrics import QualityMetrics
 
 # Initialize metrics
 metrics = QualityMetrics()
@@ -191,6 +186,33 @@ metrics = QualityMetrics()
 psnr = metrics.calculate_psnr(original, degraded)
 ssim = metrics.calculate_ssim(original, degraded)
 lpips = metrics.calculate_lpips(original, degraded)
+```
+
+### Video Creation
+
+```python
+from frame_gen.src.utils.video_processing import create_video_from_frames
+
+# Create a video from a directory of frames
+create_video_from_frames(
+    frames_dir="/path/to/frames",
+    output_video="/path/to/output.mp4",
+    fps=60,
+    codec="libx264"
+)
+```
+
+## Development
+
+```python
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_interpolation.py
+
+# Run with coverage report
+pytest --cov=frame_gen
 ```
 
 ## Contributing
@@ -203,4 +225,4 @@ lpips = metrics.calculate_lpips(original, degraded)
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+This project is licensed under the MIT License - see the LICENSE file for details.
