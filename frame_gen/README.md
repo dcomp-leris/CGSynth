@@ -29,10 +29,10 @@ This project uses different Python versions for different interpolation methods:
 
 ```bash
 # For RIFE (Python 3.8.20)
-python3.8 -m venv venv_rife
-source venv_rife/bin/activate  # On Linux/Mac
+python3.8 -m venv rife_venv
+source rife_venv/bin/activate  # On Linux/Mac
 # or
-.\venv_rife\Scripts\activate  # On Windows
+.\rife_venv\Scripts\activate  # On Windows
 ```
 
 ### Install the Package
