@@ -217,27 +217,23 @@ def rife_interpolate_client(frame1, frame3, temp_dir, exp=1):
                 
                 # Read frames in correct order
                 interpolated_frames = []
-                # First read frame1
-                interpolated_frames.append(frame1)
                 
-                # Then read interpolated frames in order
-                if exp == 1:
-                    # Legacy mode: just read the middle frame without index
+                if exp == 0:
+                    # Legacy mode: read single interpolated frame
                     interpolated_frame = cv2.imread(output_path)
                     if interpolated_frame is None:
                         raise RuntimeError(f"Failed to read interpolated frame from {output_path}")
-                    interpolated_frames.append(interpolated_frame)
+                    interpolated_frames = [frame1, interpolated_frame, frame3]
                 else:
-                    # Read all interpolated frames with indices
-                    for j in range(2**exp - 1):
+                    # For exp >= 1, read only the numbered frames (_0 to _N)
+                    # The server saves frames as frame1_0, frame1_1, frame1_2, etc.
+                    num_frames = 2**exp + 1  # Total number of frames including frame1 and frame3
+                    for j in range(num_frames):
                         frame_path = output_path.replace('.png', f'_{j}.png')
-                        interpolated_frame = cv2.imread(frame_path)
-                        if interpolated_frame is None:
-                            raise RuntimeError(f"Failed to read interpolated frame from {frame_path}")
-                        interpolated_frames.append(interpolated_frame)
-                
-                # Finally read frame3
-                interpolated_frames.append(frame3)
+                        frame = cv2.imread(frame_path)
+                        if frame is None:
+                            raise RuntimeError(f"Failed to read frame from {frame_path}")
+                        interpolated_frames.append(frame)
                 
                 return interpolated_frames
                 
@@ -286,17 +282,17 @@ def process_frames(method='addWeighted', args=None):
         original_fps = 30
         print(f"Original video: {num_original_frames} frames at {original_fps} FPS")
         
-        if args.exp > 1:
+        if args.exp == 0:
+            print("Using legacy mode: interpolate once between frames 1 and 3 to replace frame 2")
+            target_fps = original_fps  # Keep original FPS
+            interpolate = lambda frame1, frame2: rife_interpolate_client(frame1, frame2, rife_temp_dir, 0)  # Pass exp=0
+        else:
             # Calculate target FPS based on exp
             target_fps = original_fps * (2**args.exp)
             print(f"Target FPS: {target_fps} (original_fps * 2^{args.exp})")
             print(f"Using exp={args.exp} for RIFE interpolation")
             print(f"This will generate {2**args.exp - 1} intermediate frames per pair")
-        else:
-            print("Using legacy mode: generating one intermediate frame per pair")
-            target_fps = original_fps * 2  # Double the FPS for one intermediate frame
-        
-        interpolate = lambda frame1, frame2: rife_interpolate_client(frame1, frame2, rife_temp_dir, args.exp)
+            interpolate = lambda frame1, frame2: rife_interpolate_client(frame1, frame2, rife_temp_dir, args.exp)
     else:
         interpolate = interpolation_methods[method]
 
@@ -307,39 +303,76 @@ def process_frames(method='addWeighted', args=None):
         return
 
     # Calculate total number of frames we'll generate
-    num_intermediate_frames = 2**args.exp - 1
-    total_frames = len(frame_files) + (len(frame_files) - 1) * num_intermediate_frames
+    if args.exp == 0:
+        total_frames = len(frame_files)  # Same number of frames, just replacing frame 2
+    else:
+        num_intermediate_frames = 2**args.exp - 1
+        total_frames = len(frame_files) + (len(frame_files) - 1) * num_intermediate_frames
     print(f"Will generate {total_frames} frames in total")
 
     frame_counter = 1
     # Process frames in pairs
-    for i in range(0, len(frame_files) - 1):
-        frame1_path = os.path.join(original_folder, frame_files[i])
-        frame2_path = os.path.join(original_folder, frame_files[i + 1])
+    if args.exp == 0:
+        # For exp=0, process frames in groups of 3 (1-3, 4-6, 7-9, etc)
+        for i in range(0, len(frame_files) - 2, 3):
+            frame1_path = os.path.join(original_folder, frame_files[i])
+            frame3_path = os.path.join(original_folder, frame_files[i + 2])
 
-        frame1 = cv2.imread(frame1_path)
-        frame2 = cv2.imread(frame2_path)
+            frame1 = cv2.imread(frame1_path)
+            frame3 = cv2.imread(frame3_path)
 
-        try:
-            # Get all frames including interpolated ones
-            all_frames = interpolate(frame1, frame2)
-            
-            # Save all frames in sequence
-            for frame in all_frames:
-                frame_dest = os.path.join(processed_folder, f'{frame_counter:04d}.png')
-                cv2.imwrite(frame_dest, frame)
-                print(f"Saved frame {frame_counter}: {frame_dest}")
-                frame_counter += 1
+            try:
+                # Get all frames including interpolated ones
+                all_frames = interpolate(frame1, frame3)
                 
-        except Exception as e:
-            print(f"Error during interpolation: {e}")
-            sys.exit(1)
-    
-    # Save the last frame
-    last_frame = cv2.imread(os.path.join(original_folder, frame_files[-1]))
-    frame_dest = os.path.join(processed_folder, f'{frame_counter:04d}.png')
-    cv2.imwrite(frame_dest, last_frame)
-    print(f"Saved frame {frame_counter}: {frame_dest}")
+                # Save all frames in sequence
+                for frame in all_frames:
+                    frame_dest = os.path.join(processed_folder, f'{frame_counter:04d}.png')
+                    cv2.imwrite(frame_dest, frame)
+                    print(f"Saved frame {frame_counter}: {frame_dest}")
+                    frame_counter += 1
+                    
+            except Exception as e:
+                print(f"Error during interpolation: {e}")
+                sys.exit(1)
+        
+        # Save any remaining frames
+        remaining_start = (len(frame_files) // 3) * 3
+        for i in range(remaining_start, len(frame_files)):
+            frame = cv2.imread(os.path.join(original_folder, frame_files[i]))
+            frame_dest = os.path.join(processed_folder, f'{frame_counter:04d}.png')
+            cv2.imwrite(frame_dest, frame)
+            print(f"Saved frame {frame_counter}: {frame_dest}")
+            frame_counter += 1
+    else:
+        # For exp>0, process consecutive frames
+        for i in range(0, len(frame_files) - 1):
+            frame1_path = os.path.join(original_folder, frame_files[i])
+            frame2_path = os.path.join(original_folder, frame_files[i + 1])
+
+            frame1 = cv2.imread(frame1_path)
+            frame2 = cv2.imread(frame2_path)
+
+            try:
+                # Get all frames including interpolated ones
+                all_frames = interpolate(frame1, frame2)
+                
+                # Save all frames in sequence
+                for frame in all_frames:
+                    frame_dest = os.path.join(processed_folder, f'{frame_counter:04d}.png')
+                    cv2.imwrite(frame_dest, frame)
+                    print(f"Saved frame {frame_counter}: {frame_dest}")
+                    frame_counter += 1
+                    
+            except Exception as e:
+                print(f"Error during interpolation: {e}")
+                sys.exit(1)
+        
+        # Save the last frame
+        last_frame = cv2.imread(os.path.join(original_folder, frame_files[-1]))
+        frame_dest = os.path.join(processed_folder, f'{frame_counter:04d}.png')
+        cv2.imwrite(frame_dest, last_frame)
+        print(f"Saved frame {frame_counter}: {frame_dest}")
 
     # Clean up
     if method == 'rife' and rife_server:
