@@ -9,29 +9,31 @@ This project uses Git submodules. To properly initialize them, run:
 git submodule update --init
 ```
 
-# RTP Video Tools
+## Project Components
+
+### 1. RTP Video Tools
 
 A pair of Python scripts for working with video streams over RTP networks. These tools enable you to create packet captures (PCAPs) of H.264/H.265 video streams and extract the original video from such captures.
 
-## Overview
+#### Overview
 
 - **rtp_video_packetizer.py**: Converts a series of PNG images into an H.264/H.265 video stream, creates RTP packets for network transmission, and stores them in a PCAP file.
 - **rtp_video_extractor.py**: Extracts H.264/H.265 video from RTP packets in a PCAP file and reconstructs the original video stream.
 
-## Requirements
+#### Requirements
 
 - Python 3.6+
 - Scapy (`pip install scapy`)
 - FFmpeg (must be installed and available in your PATH)
 
 Additional Python dependencies:
-```
+```bash
 pip install scapy
 ```
 
-## Usage
+#### Usage
 
-### Creating RTP Video Packets (PCAP)
+##### Creating RTP Video Packets (PCAP)
 
 ```bash
 python rtp_video_packetizer.py
@@ -49,7 +51,7 @@ Configuration options are defined within the script, including:
 - Network parameters (IP addresses, ports)
 - Video codec (H.264 or H.265)
 
-### Extracting Video from PCAP
+##### Extracting Video from PCAP
 
 ```bash
 python rtp_video_extractor.py input_pcap.pcap [-o output_video.mp4] [-c codec]
@@ -65,29 +67,54 @@ Example:
 python rtp_video_extractor.py rtp_stream_h264_fixed.pcap -o extracted_video.mp4 -c h264
 ```
 
-## How It Works
+### 2. Quality Metrics Tools
 
-### Packetizer
-1. Reads PNG image frames from a directory
-2. Encodes each frame to H.264/H.265 using FFmpeg
-3. Extracts NAL units from the encoded video
-4. Packetizes NAL units into RTP packets according to RFC standards
-5. Creates Ethernet, IP, and UDP headers for the packets
-6. Writes the complete packets to a PCAP file
+Located in the `frame_gen/tools` directory, these tools help evaluate and analyze video quality metrics, particularly useful for comparing original and processed/interpolated video frames.
 
-### Extractor
-1. Reads RTP packets from a PCAP file
-2. Extracts video payload from each packet
-3. Reconstructs fragmented NAL units
-4. Builds a complete H.264/H.265 bitstream with proper start codes
-5. Uses FFmpeg to convert the raw bitstream to a playable MP4 file
+#### Setup for Quality Metrics Tools
+
+1. Create a Python virtual environment:
+```bash
+python3.12.2 -m venv /home/user/venv/cgreplay_metrics
+source /home/user/venv/cgreplay_metrics/bin/activate
+```
+
+2. Install dependencies:
+```bash
+pip install -r frame_gen/tools/requirements_tools.txt
+```
+
+#### Available Quality Metrics Tools
+
+1. **PSNR and SSIM Analysis** (`frame_gen/tools/psnr_and_ssim.py`)
+   - Calculates Peak Signal-to-Noise Ratio (PSNR) and Structural Similarity Index (SSIM)
+   - Generates plots showing metrics over time
+   - Usage: `python frame_gen/tools/psnr_and_ssim.py`
+
+2. **Real-time Quality Metrics Dashboard** (`frame_gen/tools/real_time_quality_metrics.py`)
+   - Streamlit-based dashboard for real-time visualization
+   - Calculates PSNR, SSIM, LPIPS, and tLPIPS
+   - Usage: `streamlit run frame_gen/tools/real_time_quality_metrics.py`
+
+3. **Mean Opinion Score (MOS) Evaluation** (`frame_gen/tools/mean_opinion_score_video_pairs.py`)
+   - Tool for subjective quality evaluations
+   - Randomizes video pair order
+   - Collects ratings and comments
+   - Usage: `python frame_gen/tools/mean_opinion_score_video_pairs.py`
+
+4. **Video Utilities** (`frame_gen/tools/video_utils.py`)
+   - Collection of utility functions for video processing
+   - Includes functions for reading, writing, resizing, and frame rate modification
+   - Can be imported as a Python module
+
+For detailed usage instructions of each quality metrics tool, please refer to the README.md in the `frame_gen/tools` directory.
 
 ## Notes
 
-- The packetizer assumes PNG files are named and ordered sequentially
-- The extractor handles out-of-order packets and fragmented NAL units
-- Both scripts support H.264 and H.265 codecs
-- The packetizer code has additional functionality for reading encrypted commands from a sync file (optional)
+- All tools require Python 3.12.2 or higher
+- Some tools (like LPIPS) require CUDA-capable GPU for optimal performance
+- Make sure your input videos/frames have matching dimensions when comparing them
+- The tools are designed to work with common video formats (MP4) and image formats (PNG)
 
 ## Troubleshooting
 
@@ -95,3 +122,4 @@ python rtp_video_extractor.py rtp_stream_h264_fixed.pcap -o extracted_video.mp4 
 - Check that your PNG images are valid and can be encoded by FFmpeg
 - For extraction problems, verify that the PCAP contains valid RTP packets with H.264/H.265 payload
 - Malformed or incomplete packets in the PCAP file may result in corrupted video output
+- For quality metrics tools, ensure you have the correct Python version and all dependencies installed

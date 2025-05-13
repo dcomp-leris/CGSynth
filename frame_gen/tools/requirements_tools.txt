@@ -6,6 +6,3 @@ lpips==0.1.4
 torch==2.2.1
 pillow==10.2.0
 torchvision==0.17.1
-tensorflow==2.15.0
-tensorflow-hub==0.15.0
-rife==1.0.0

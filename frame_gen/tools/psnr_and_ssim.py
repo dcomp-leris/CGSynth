@@ -42,8 +42,6 @@ frame_labels = []
 
 print("matching files:" + str(matching_files))
 
-sys.exit(0)
-
 for filename in matching_files:
     original_path = os.path.join(original_folder, filename)
     comparison_path = os.path.join(comparison_folder, filename)
