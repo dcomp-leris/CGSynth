@@ -16,7 +16,10 @@ import logging
 
 # Add the parent directory to the Python path to import from interpolation
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from interpolation.interpolate_frames import create_video_from_frames
+tools_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tools')
+if tools_path not in sys.path:
+    sys.path.append(tools_path)
+from video_utils import create_video_from_frames
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -190,6 +193,8 @@ def main():
                       help='Resolution in format WIDTHxHEIGHT (e.g., 1920x1080)')
     parser.add_argument('--generate_video', type=str, default='GENERATE_VIDEO',
                       help='Whether to generate a video from the frames')
+    parser.add_argument('--fps', type=int, default=30,
+                      help='Frames per second for the output video')
     
     args = parser.parse_args()
     
@@ -209,8 +214,8 @@ def main():
     
     # Generate video if requested
     if args.generate_video == 'GENERATE_VIDEO':
-        output_video = os.path.join(os.path.dirname(__file__), f'predicted_{args.res.replace("x", "_")}.mp4')
-        create_video_from_frames(processed_folder, output_video)
+        output_video = os.path.join(os.path.dirname(__file__), f'predicted_{args.res.replace("x", "_")}_{args.fps}.mp4')
+        create_video_from_frames(processed_folder, output_video, args.fps)
 
 if __name__ == "__main__":
     main() 

@@ -46,34 +46,12 @@ def create_video_from_frames(frame_folder, output_path='output_video.mp4', fps=3
     print(f"Generating video from {frame_folder} at {fps} fps...")
     
     try:
-        # Try to import the function from src module
-        try:
-            src_path = os.path.join(get_repo_root(), "frame_gen", "src")
-            if src_path not in sys.path:
-                sys.path.append(src_path)
-            
-            from src.utils.video_utils import create_video_from_frames as src_create_video
-            src_create_video(frames_dir=frame_folder, output_video=output_path, fps=fps, codec="libx264")
-            print(f"Video successfully saved to {output_path} using src module")
-            return True
-        except ImportError:
-            # Fall back to direct ffmpeg method
-            print("Could not import from src module, using direct ffmpeg command...")
-            
-            # Construct the ffmpeg command
-            ffmpeg_cmd = [
-                'ffmpeg',
-                '-y',  # Overwrite if output file exists
-                '-framerate', str(fps),
-                '-i', os.path.join(frame_folder, '%04d.png'),
-                '-c:v', 'libx264',
-                '-pix_fmt', 'yuv420p',
-                output_path
-            ]
-            
-            subprocess.run(ffmpeg_cmd, check=True)
-            print(f"Video successfully saved to {output_path}")
-            return True
+        # Add tools directory to path and import
+        tools_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tools')
+        if tools_path not in sys.path:
+            sys.path.append(tools_path)
+        from video_utils import create_video_from_frames as video_utils_create_video
+        return video_utils_create_video(frame_folder, output_path, fps)
     except Exception as e:
         print(f"Error during video generation: {e}")
         return False
@@ -92,7 +70,7 @@ def rife_interpolation(frame1, frame3, model):
     print("RIFE interpolation using ECCV2022-RIFE repository...")
     
     # Create temporary directory for frames
-    temp_dir = os.path.join(os.path.dirname(__file__), 'temp_frames')
+    temp_dir = os.path.join(os.path.dirname(__file__), 'rife_temp')
     os.makedirs(temp_dir, exist_ok=True)
     
     # Save frames to temporary directory
@@ -115,7 +93,7 @@ python inference_img.py --img "{frame1_path}" "{frame3_path}" --exp 1
 ''')
     
     # Make the script executable
-    os.chmod(script_path, 0o755)
+    os.chmod(script_path, 0o555)
     
     try:
         # Run the script
@@ -194,10 +172,16 @@ def start_rife_server():
         logger.error(f"Failed to start RIFE server: {e}")
         return None
 
-def rife_interpolate_client(frame1, frame3, temp_dir):
+def rife_interpolate_client(frame1, frame3, temp_dir, num_intermediate_frames=1):
     """
     Send frames to RIFE server for interpolation.
-    Returns the interpolated frame.
+    Returns the interpolated frames.
+    
+    Args:
+        frame1: First frame
+        frame3: Last frame
+        temp_dir: Directory for temporary files
+        num_intermediate_frames: Number of intermediate frames to generate
     """
     os.makedirs(temp_dir, exist_ok=True)
     
@@ -214,15 +198,21 @@ def rife_interpolate_client(frame1, frame3, temp_dir):
     print(f"  frame3: {frame3_path}")
     print(f"  output: {output_path}")
     
+    # Calculate exp based on num_intermediate_frames
+    # If we want n intermediate frames, we need exp where 2^exp - 1 = n
+    exp = int(np.ceil(np.log2(num_intermediate_frames + 1)))
+    
     # Try to connect with retries
     max_retries = 3
     retry_delay = 1
     
+    interpolated_frames = []
     for i in range(max_retries):
         try:
             # Connect to server and send request
             with socket.create_connection(('localhost', 50051), timeout=5) as sock:
-                msg = f"{frame1_path}|{frame3_path}|{output_path}\n"
+                # Send the message with exp parameter
+                msg = f"{frame1_path}|{frame3_path}|{output_path}|0.5|{exp}\n"
                 print(f"Sending message to server: {msg.strip()}")
                 sock.sendall(msg.encode())
                 response = sock.recv(1024).decode()
@@ -230,12 +220,15 @@ def rife_interpolate_client(frame1, frame3, temp_dir):
                 if not response.startswith("OK"):
                     raise RuntimeError(f"RIFE server error: {response}")
                 
-                # Read and return interpolated frame
-                interpolated_frame = cv2.imread(output_path)
-                if interpolated_frame is None:
-                    raise RuntimeError(f"Failed to read interpolated frame from {output_path}")
+                # Read all interpolated frames
+                for j in range(2**exp - 1):  # -1 because we don't need the last frame
+                    frame_path = output_path.replace('.png', f'_{j+1}.png')
+                    interpolated_frame = cv2.imread(frame_path)
+                    if interpolated_frame is None:
+                        raise RuntimeError(f"Failed to read interpolated frame from {frame_path}")
+                    interpolated_frames.append(interpolated_frame)
                 
-                return interpolated_frame
+                return interpolated_frames
                 
         except (ConnectionRefusedError, socket.timeout) as e:
             if i < max_retries - 1:
@@ -249,7 +242,7 @@ def stop_rife_server():
     with socket.create_connection(('localhost', 50051)) as sock:
         sock.sendall(b"EXIT\n")
 
-def process_frames(method='addWeighted'):
+def process_frames(method='addWeighted', args=None):
     print(f"Using interpolation method: {method}")
 
     # Map method names to functions
@@ -273,7 +266,10 @@ def process_frames(method='addWeighted'):
     # Set the interpolation function
     if method == 'rife':
         rife_temp_dir = os.path.join(os.path.dirname(__file__), 'rife_temp')
-        interpolate = lambda frame1, frame2: rife_interpolate_client(frame1, frame2, rife_temp_dir)
+        # Use a fixed number of intermediate frames for RIFE
+        num_intermediate_frames = 1  # Default to 1 intermediate frame
+        print(f"Generating {num_intermediate_frames} intermediate frames per pair")
+        interpolate = lambda frame1, frame2: rife_interpolate_client(frame1, frame2, rife_temp_dir, num_intermediate_frames)
     else:
         interpolate = interpolation_methods[method]
 
@@ -298,10 +294,11 @@ def process_frames(method='addWeighted'):
         
         try:
             # Create interpolated frame
-            interpolated_frame = interpolate(frame1, frame3)
-            interpolated_frame_dest = os.path.join(processed_folder, f'{(i+2):04d}.png')
-            cv2.imwrite(interpolated_frame_dest, interpolated_frame)
-            print(f"Saved interpolated frame: {interpolated_frame_dest}")
+            interpolated_frames = interpolate(frame1, frame3)
+            for j, interpolated_frame in enumerate(interpolated_frames):
+                interpolated_frame_dest = os.path.join(processed_folder, f'{(i+2+j):04d}.png')
+                cv2.imwrite(interpolated_frame_dest, interpolated_frame)
+                print(f"Saved interpolated frame: {interpolated_frame_dest}")
         except Exception as e:
             print(f"Error during interpolation: {e}")
             sys.exit(1)
@@ -345,12 +342,12 @@ def main():
     os.makedirs(processed_folder, exist_ok=True)
     
     # Process frames
-    process_frames(method=args.method)
+    process_frames(method=args.method, args=args)
     
     # Generate video if requested
     if args.generate_video == 'GENERATE_VIDEO':
         output_video = os.path.join(os.path.dirname(__file__), f'interpolated_{args.method}_{args.res.replace("x", "_")}.mp4')
-        create_video_from_frames(processed_folder, output_video)
+        create_video_from_frames(processed_folder, output_video, 30)  # Use default 30 FPS
 
 if __name__ == "__main__":
     main()

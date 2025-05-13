@@ -1,2 +1,0 @@
-user_id,scene,video_A_filename,video_B_filename,A_score,B_score,A_comment,B_comment,video_A_is_real,video_B_is_real
-6VHS4K2WE8,scene_01,scene_01_interp.mp4,scene_01_real.mp4,4,3,good video,N/A,False,True
