@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Pycache directories
+tools/__pycache__/
+
+
 # C extensions
 *.so
 
@@ -189,3 +193,19 @@ frame_gen/**/*.JPEG
 # Then, explicitly un-ignore the original_frames directory
 !frame_gen/original_frames/
 !frame_gen/original_frames/**
+
+
+# Video files
+# First, ignore all video files in frame_gen
+frame_gen/**/*.mp4
+frame_gen/**/*.avi
+frame_gen/**/*.mkv
+frame_gen/**/*.MP4
+frame_gen/**/*.AVI
+frame_gen/**/*.MKV
+
+# Then, explicitly un-ignore the original_video
+!original_video.mp4
+!original_video.avi
+!original_video.mkv
+!original_video/*.mp4
