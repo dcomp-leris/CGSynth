@@ -67,7 +67,28 @@ Example:
 python rtp_video_extractor.py rtp_stream_h264_fixed.pcap -o extracted_video.mp4 -c h264
 ```
 
-### 2. Quality Metrics Tools
+### 2. Frame Generation and Degradation Toolkit
+
+Located in the `frame_gen` directory, this toolkit provides tools for generating and degrading video frames, as well as evaluating their quality. It includes:
+
+#### Frame Generation
+- Frame interpolation and upscaling capabilities
+- Support for various video processing algorithms
+- Integration with RIFE (Real-time Intermediate Flow Estimation) for high-quality frame interpolation
+
+#### Frame Degradation
+- Tools for simulating network conditions
+- Frame dropping and quality reduction utilities
+- Customizable degradation parameters
+
+#### Quality Assessment
+- Comprehensive set of quality metrics tools (see Quality Metrics Tools section)
+- Support for both objective and subjective quality evaluation
+- Real-time visualization capabilities
+
+For detailed usage instructions, please refer to the documentation in the `frame_gen` directory.
+
+### 3. Quality Metrics Tools
 
 Located in the `frame_gen/tools` directory, these tools help evaluate and analyze video quality metrics, particularly useful for comparing original and processed/interpolated video frames.
 
