@@ -9,6 +9,23 @@ This project uses Git submodules. To properly initialize them, run:
 git submodule update --init
 ```
 
+### Python Environment Setup
+
+#### For Frame Generation Component
+The frame generation component requires Python 3.8. You can install it using the deadsnakes PPA:
+
+```bash
+# Add deadsnakes PPA
+sudo add-apt-repository ppa:deadsnakes/ppa
+sudo apt update
+
+# Install Python 3.8 and required packages
+sudo apt install python3.8 python3.8-venv python3.8-dev
+```
+
+#### For Quality Metrics Tools
+The quality metrics tools require Python 3.12.2. See the Quality Metrics Tools section for setup instructions.
+
 ## Project Components
 
 ### 1. RTP Video Tools
