@@ -5,6 +5,17 @@ import os
 import random
 from tqdm import tqdm
 from scipy.ndimage import zoom
+import sys
+import shutil
+
+# Add tools directory to Python path at the start of the file
+current_dir = os.path.dirname(os.path.abspath(__file__))
+tools_dir = os.path.join(os.path.dirname(current_dir), 'tools')
+if tools_dir not in sys.path:
+    sys.path.append(tools_dir)
+
+# Now we can import video_utils
+from video_utils import create_video_from_frames
 
 class CloudGamingNoise:
     def __init__(self, seed=None):
@@ -255,6 +266,28 @@ class CloudGamingNoise:
             
         return result
 
+def ensure_clean_output_dir(output_dir):
+    """Ensure output directory exists and is clean.
+    
+    Args:
+        output_dir: Path to the output directory
+    """
+    # Convert to absolute path
+    output_dir = os.path.abspath(output_dir)
+    
+    # If directory exists, remove all contents
+    if os.path.exists(output_dir):
+        print(f"Cleaning existing output directory: {output_dir}")
+        for item in os.listdir(output_dir):
+            item_path = os.path.join(output_dir, item)
+            if os.path.isfile(item_path):
+                os.remove(item_path)
+            elif os.path.isdir(item_path):
+                shutil.rmtree(item_path)
+    else:
+        # Create directory if it doesn't exist
+        print(f"Creating output directory: {output_dir}")
+        os.makedirs(output_dir, exist_ok=True)
 
 def main():
     parser = argparse.ArgumentParser(description="Add realistic network artifacts to video frames")
@@ -262,13 +295,18 @@ def main():
     parser.add_argument("--output_dir", required=True, help="Directory to save processed frames")
     parser.add_argument("--severity", type=float, default=0.5, help="Overall severity of artifacts (0.0-1.0)")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
-    parser.add_argument("--frame_pattern", default="frame_%04d.png", help="Pattern for frame filenames")
     parser.add_argument("--effect_types", choices=['network', 'rendering', 'all'], default='all', 
                        nargs='+', help="Type of effects to apply")
+    parser.add_argument("--generate_video", type=str, default='yes',
+                      help='Whether to generate a video from the frames (yes/no)')
+    parser.add_argument("--fps", type=int, default=30,
+                      help='Frames per second for the output video')
+    parser.add_argument("--codec", type=str, default='libx264',
+                      help='Video codec to use')
     args = parser.parse_args()
     
-    # Create output directory if it doesn't exist
-    os.makedirs(args.output_dir, exist_ok=True)
+    # Ensure output directory is clean and exists
+    ensure_clean_output_dir(args.output_dir)
     
     # Get list of files
     input_files = sorted([f for f in os.listdir(args.input_dir) 
@@ -305,29 +343,44 @@ def main():
         # Apply degradation
         degraded_frame = noise_gen.process_frame(frame, profile[i])
         processed_frames.append(degraded_frame)
-        
-        # Save processed frame
-        output_path = os.path.join(args.output_dir, filename)
-        cv2.imwrite(output_path, degraded_frame)
     
     # Simulate frame freezes if included in effects
     should_freeze = args.severity > 0.2 and ('all' in args.effect_types or 'network' in args.effect_types)
     
     if should_freeze:
         print("Simulating frame freezes...")
-        frozen_frames = noise_gen.simulate_frame_freeze(processed_frames, 
-                                                       freeze_probability=0.02 * args.severity,
-                                                       freeze_duration=int(5 * args.severity))
-        
-        # Save the frames with freezes
-        for i, frame in enumerate(tqdm(frozen_frames)):
-            output_path = os.path.join(args.output_dir, args.frame_pattern % i)
-            cv2.imwrite(output_path, frame)
-    else:
-        print("Frame freezing skipped (not included in selected effects)")
+        processed_frames = noise_gen.simulate_frame_freeze(processed_frames, 
+                                                         freeze_probability=0.02 * args.severity,
+                                                         freeze_duration=int(5 * args.severity))
     
-    print(f"Processing complete. {len(input_files)} frames processed.")
+    # Save only the final frames
+    print("Saving final frames...")
+    for i, frame in enumerate(tqdm(processed_frames)):
+        # Use the pattern that video_utils expects (%04d.png)
+        output_path = os.path.join(args.output_dir, "%04d.png" % i)
+        cv2.imwrite(output_path, frame)
+    
+    print(f"Processing complete. {len(processed_frames)} frames processed.")
     print(f"Results saved to {args.output_dir}")
+    
+    # Add video generation if requested
+    if args.generate_video.lower() == 'yes':
+        # Generate video filename based on output directory
+        video_filename = f"degraded_video_{args.severity}_{'_'.join(args.effect_types)}.mp4"
+        output_video = os.path.join(args.output_dir, video_filename)
+        
+        print(f"\nGenerating video from processed frames...")
+        success = create_video_from_frames(
+            args.output_dir,  # Just pass the directory
+            output_video,
+            args.fps,
+            args.codec
+        )
+        
+        if success:
+            print(f"Video successfully generated: {output_video}")
+        else:
+            print("Failed to generate video")
 
 if __name__ == "__main__":
     main()
