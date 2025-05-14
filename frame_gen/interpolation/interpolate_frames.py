@@ -260,7 +260,7 @@ def stop_rife_server():
     with socket.create_connection(('localhost', 50051)) as sock:
         sock.sendall(b"EXIT\n")
 
-def process_frames(method='addWeighted', args=None):
+def process_frames(method='addWeighted', args=None, original_folder=None, processed_folder=None):
     print(f"Using interpolation method: {method}")
 
     # Map method names to functions
@@ -429,24 +429,24 @@ def main():
     args = parser.parse_args()
     
     # Set up paths
-    global original_folder, processed_folder
-    original_folder = os.path.join(os.path.dirname(__file__), f'downscaled_original_frames_from_1920_1080_to_{args.res.replace("x", "_")}')
-    processed_folder = os.path.join(os.path.dirname(__file__), f'processed_frames_{args.method}_{args.res.replace("x", "_")}')
+    frame_gen_dir = Path(__file__).parent.parent  # Go up one level to frame_gen
+    original_folder = frame_gen_dir / 'rescaling' / f'downscaled_original_frames_from_1920_1080_to_{args.res.replace("x", "_")}'
+    processed_folder = frame_gen_dir / 'interpolation' / f'processed_frames_{args.method}_{args.res.replace("x", "_")}'
     
-    print(f"normalized_original_folder: ", original_folder)
-    print(f"normalized_base_path: ", os.path.dirname(__file__))
+    print(f"Original folder: {original_folder}")
+    print(f"Processed folder: {processed_folder}")
     
     # Create output directory if it doesn't exist
     os.makedirs(processed_folder, exist_ok=True)
     
-    # Process frames
-    process_frames(method=args.method, args=args)
+    # Process frames - pass the folders as parameters
+    process_frames(method=args.method, args=args, original_folder=original_folder, processed_folder=processed_folder)
     
     # Generate video if requested
     if args.generate_video == 'yes':
         # Calculate target FPS based on exp
         target_fps = args.original_fps * (2**args.exp)
-        output_video = os.path.join(os.path.dirname(__file__), f'interpolated_{args.method}_{args.res.replace("x", "_")}_{target_fps}fps.mp4')
+        output_video = frame_gen_dir / 'interpolation' / f'interpolated_{args.method}_{args.res.replace("x", "_")}_{target_fps}fps.mp4'
         create_video_from_frames(processed_folder, output_video, target_fps)
 
 if __name__ == "__main__":
