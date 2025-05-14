@@ -182,6 +182,32 @@ def main():
                 
                 # Small delay to control playback speed
                 time.sleep(0.033)  # ~30fps
+            
+            # After the video ends, show download and restart options
+            st.subheader("Download Metrics")
+            
+            # Create a CSV string from the metrics history
+            spatial_csv = metrics_history['Spatial'].to_csv(index=True)
+            perceptual_csv = metrics_history['Perceptual'].to_csv(index=True)
+            
+            # Create download buttons
+            st.download_button(
+                label="Download Spatial Metrics (PSNR, SSIM)",
+                data=spatial_csv,
+                file_name="spatial_metrics.csv",
+                mime="text/csv"
+            )
+            
+            st.download_button(
+                label="Download Perceptual Metrics (LPIPS, tLPIPS)",
+                data=perceptual_csv,
+                file_name="perceptual_metrics.csv",
+                mime="text/csv"
+            )
+            
+            # Add restart option
+            if st.button("Restart Experiment"):
+                st.experimental_rerun()
                 
         finally:
             # Clean up
