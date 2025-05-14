@@ -181,7 +181,11 @@ def rife_interpolate_client(frame1, frame3, temp_dir, exp=1):
         frame1: First frame
         frame3: Last frame
         temp_dir: Directory for temporary files
-        exp: Number of interpolation steps (2^exp - 1 frames will be generated)
+        exp: Number of interpolation iterations:
+            0: Legacy mode (replace frame2 with interpolated frame)
+            1: One iteration (generates 1 frame)
+            2: Two iterations (generates 3 frames)
+            3: Three iterations (generates 7 frames)
     """
     os.makedirs(temp_dir, exist_ok=True)
     
@@ -225,15 +229,22 @@ def rife_interpolate_client(frame1, frame3, temp_dir, exp=1):
                         raise RuntimeError(f"Failed to read interpolated frame from {output_path}")
                     interpolated_frames = [frame1, interpolated_frame, frame3]
                 else:
-                    # For exp >= 1, read only the numbered frames (_0 to _N)
-                    # The server saves frames as frame1_0, frame1_1, frame1_2, etc.
-                    num_frames = 2**exp + 1  # Total number of frames including frame1 and frame3
+                    # For exp >= 1, read only the intermediate frames
+                    # For exp=1: 1 frame
+                    # For exp=2: 3 frames
+                    # For exp=3: 7 frames
+                    num_frames = 2**exp - 1  # Number of interpolated frames
+                    print(f"Reading {num_frames} interpolated frames")
                     for j in range(num_frames):
                         frame_path = output_path.replace('.png', f'_{j}.png')
                         frame = cv2.imread(frame_path)
                         if frame is None:
                             raise RuntimeError(f"Failed to read frame from {frame_path}")
                         interpolated_frames.append(frame)
+                    
+                    # Add original frames at start and end
+                    interpolated_frames = [frame1] + interpolated_frames + [frame3]
+                    print(f"Total frames after adding originals: {len(interpolated_frames)}")
                 
                 return interpolated_frames
                 
@@ -287,11 +298,23 @@ def process_frames(method='addWeighted', args=None):
             target_fps = original_fps  # Keep original FPS
             interpolate = lambda frame1, frame2: rife_interpolate_client(frame1, frame2, rife_temp_dir, 0)  # Pass exp=0
         else:
-            # Calculate target FPS based on exp
-            target_fps = original_fps * (2**args.exp)
-            print(f"Target FPS: {target_fps} (original_fps * 2^{args.exp})")
+            # Calculate total frames and target FPS
+            frame_files = sorted([f for f in os.listdir(original_folder) if f.endswith('.png') or f.endswith('.jpg')])
+            num_original_frames = len(frame_files)
+            num_intermediate_frames = (num_original_frames - 1) * (2**args.exp - 1)
+            total_frames = num_original_frames + num_intermediate_frames
+            
+            # Calculate duration in seconds
+            original_duration = num_original_frames / original_fps
+            
+            # Calculate new FPS to maintain duration
+            target_fps = total_frames / original_duration
+            
+            print(f"Original video: {num_original_frames} frames at {original_fps} FPS ({original_duration:.2f} seconds)")
+            print(f"Will generate {num_intermediate_frames} intermediate frames")
+            print(f"Total frames: {total_frames}")
+            print(f"Target FPS: {target_fps:.2f} (to maintain {original_duration:.2f} seconds duration)")
             print(f"Using exp={args.exp} for RIFE interpolation")
-            print(f"This will generate {2**args.exp - 1} intermediate frames per pair")
             interpolate = lambda frame1, frame2: rife_interpolate_client(frame1, frame2, rife_temp_dir, args.exp)
     else:
         interpolate = interpolation_methods[method]
@@ -306,8 +329,8 @@ def process_frames(method='addWeighted', args=None):
     if args.exp == 0:
         total_frames = len(frame_files)  # Same number of frames, just replacing frame 2
     else:
-        num_intermediate_frames = 2**args.exp - 1
-        total_frames = len(frame_files) + (len(frame_files) - 1) * num_intermediate_frames
+        num_intermediate_frames = (len(frame_files) - 1) * (2**args.exp - 1)
+        total_frames = len(frame_files) + num_intermediate_frames
     print(f"Will generate {total_frames} frames in total")
 
     frame_counter = 1
@@ -356,23 +379,29 @@ def process_frames(method='addWeighted', args=None):
             try:
                 # Get all frames including interpolated ones
                 all_frames = interpolate(frame1, frame2)
+                print(f"Generated {len(all_frames)} frames for pair {i+1}-{i+2}")
                 
-                # Save all frames in sequence
-                for frame in all_frames:
-                    frame_dest = os.path.join(processed_folder, f'{frame_counter:04d}.png')
-                    cv2.imwrite(frame_dest, frame)
-                    print(f"Saved frame {frame_counter}: {frame_dest}")
-                    frame_counter += 1
+                # For exp=1, we get 3 frames per pair (original + interpolated + original)
+                # We need to handle the overlap between pairs
+                if i == 0:
+                    # For first pair, save all frames
+                    for frame in all_frames:
+                        frame_dest = os.path.join(processed_folder, f'{frame_counter:04d}.png')
+                        cv2.imwrite(frame_dest, frame)
+                        print(f"Saved frame {frame_counter}: {frame_dest}")
+                        frame_counter += 1
+                else:
+                    # For subsequent pairs, skip the first frame (it's the same as last frame of previous pair)
+                    # and save the rest
+                    for frame in all_frames[1:]:
+                        frame_dest = os.path.join(processed_folder, f'{frame_counter:04d}.png')
+                        cv2.imwrite(frame_dest, frame)
+                        print(f"Saved frame {frame_counter}: {frame_dest}")
+                        frame_counter += 1
                     
             except Exception as e:
                 print(f"Error during interpolation: {e}")
                 sys.exit(1)
-        
-        # Save the last frame
-        last_frame = cv2.imread(os.path.join(original_folder, frame_files[-1]))
-        frame_dest = os.path.join(processed_folder, f'{frame_counter:04d}.png')
-        cv2.imwrite(frame_dest, last_frame)
-        print(f"Saved frame {frame_counter}: {frame_dest}")
 
     # Clean up
     if method == 'rife' and rife_server:
@@ -393,7 +422,7 @@ def main():
     parser.add_argument('--generate_video', type=str, default='yes',
                       help='Whether to generate a video from the frames')
     parser.add_argument('--exp', type=int, default=1,
-                      help='Number of interpolation steps (2^exp - 1 frames will be generated)')
+                      help='Number of interpolation steps: 0=legacy mode, 1=1 frame (2^1-1), 2=3 frames (2^2-1), 3=7 frames (2^3-1)')
     parser.add_argument('--original_fps', type=int, default=30,
                       help='FPS of the original video (default: 30)')
     
