@@ -370,7 +370,7 @@ def create_rtp_packets(codec=DEFAULT_CODEC):
 
     # Write packets to PCAP file
     print(f"Writing {len(all_packets)} packets to {output_pcap}")
-    wrpcap(output_pcap, all_packets)
+    wrpcap(output_pcap, all_packets, nano=True)
     print(f"RTP packet stream generation complete.")
 
 if __name__ == "__main__":
