@@ -11,10 +11,6 @@ DEFAULT_CODEC = "h264"
 MIN_PAYLOAD_SIZE = 900
 MAX_PAYLOAD_SIZE_LIMIT = 1400
 
-timestamp = 0
-ipi = 0
-rtp_clock_rate = 90000
-
 
 def read_commands():
     base_path = Path(__file__).parent
@@ -101,19 +97,17 @@ def encode_image_to_nalus(img_path, codec=DEFAULT_CODEC):
         os.remove(encoded_path)
 
 
-def packetize_nalu(nalu, seq, timestamp, ssrc, marker, max_payload_size, ipi_iter):
+def packetize_nalu(nalu, seq, timestamp, ssrc, marker, max_payload_size):
     packets = []
 
     if len(nalu) <= max_payload_size:
-        ipi = next(ipi_iter)
-        prev_timestamp = timestamp
-        timestamp += ipi * rtp_clock_rate
-        print(f"Timestamp updated: {prev_timestamp:.2f} + ({ipi:.6f} × {rtp_clock_rate}) = {timestamp:.2f}")
+        # Single packet NAL unit
         rtp = RTP(version=2, padding=0, extension=0, marker=marker,
                   payload_type=96, sequence=seq % 65536,
-                  timestamp=int(timestamp), sourcesync=ssrc) / Raw(load=nalu)
+                  timestamp=timestamp, sourcesync=ssrc) / Raw(load=nalu)
         packets.append((rtp, seq + 1))
     else:
+        # Fragmentation required
         nal_header = nalu[0]
         nal_type = nal_header & 0x1F
         nal_nri = (nal_header >> 5) & 0x03
@@ -125,24 +119,18 @@ def packetize_nalu(nalu, seq, timestamp, ssrc, marker, max_payload_size, ipi_ite
             end_bit = 1 if end == len(nalu) else 0
             current_marker = marker if end_bit else 0
 
-            fu_indicator = (nal_nri << 5) | 28
+            fu_indicator = (nal_nri << 5) | 28  # FU-A
             fu_header = (start_bit << 7) | (end_bit << 6) | nal_type
             fragment = bytes([fu_indicator, fu_header]) + nalu[offset:end]
 
-            
-            ipi = next(ipi_iter)
-            prev_timestamp = timestamp
-            timestamp += ipi * rtp_clock_rate
-            print(f"Timestamp updated: {prev_timestamp:.2f} + ({ipi:.6f} × {rtp_clock_rate}) = {timestamp:.2f}")
-            
             rtp = RTP(version=2, padding=0, extension=0, marker=current_marker,
                       payload_type=96, sequence=seq % 65536,
-                      timestamp=int(timestamp), sourcesync=ssrc) / Raw(load=fragment)
+                      timestamp=timestamp, sourcesync=ssrc) / Raw(load=fragment)
             packets.append((rtp, seq + 1))
             seq += 1
             offset = end
 
-    return packets, ipi_iter, timestamp
+    return packets
 
 
 def create_rtp_packets(codec=DEFAULT_CODEC):
@@ -151,20 +139,20 @@ def create_rtp_packets(codec=DEFAULT_CODEC):
     ipi_file = base_path.parent / "rtp_stream_creation" / "all_packets.txt"
     output_pcap = f"rtp_stream_{codec}.pcap"
 
-    # Network config
-    server_ip, user_ip = "192.168.0.10", "192.168.0.20"
-    server_port, user_port = 5004, 5004
-    server_mac, user_mac = "00:11:22:33:44:55", "66:77:88:99:aa:bb"
+    server_ip = "192.168.0.10"
+    user_ip = "192.168.0.20"
+    server_port = 5004
+    user_port = 5004
+    server_mac = "00:11:22:33:44:55"
+    user_mac = "66:77:88:99:aa:bb"
 
-    # RTP setup
     ssrc = 12345
     seq = 0
     timestamp = 0
+    all_packets = []
 
-    # Read commands
     commands = read_commands()
 
-    # Validate paths
     if not img_dir.exists():
         print(f"Image directory {img_dir} does not exist.")
         return
@@ -172,7 +160,6 @@ def create_rtp_packets(codec=DEFAULT_CODEC):
         print(f"IPI file {ipi_file} does not exist.")
         return
 
-    # Read IPI values
     ipis = []
     with ipi_file.open("r") as f:
         reader = csv.reader(f)
@@ -181,47 +168,52 @@ def create_rtp_packets(codec=DEFAULT_CODEC):
             try:
                 if str(row[3]) == "Other":
                     continue
-                else:
-                    ipis.append(float(row[0]) / 100000)
-                
+                ipis.append(float(row[0]) / 100000)
             except Exception as e:
                 print("Skipping invalid row:", row, "-", e)
 
-    ipi_iter = iter(ipis)
-    
     image_files = sorted(img_dir.glob("*.png"))
     print(f"Found {len(image_files)} PNG files.")
 
-    all_packets = []
+    if not ipis:
+        print("No valid IPI values found.")
+        return
+
+    rtp_clock_rate = 90000
 
     for frame_index, img_path in enumerate(image_files, start=1):
+        # Use the same timestamp for all NAL units in a frame
+        frame_timestamp = int(timestamp)
+        
         max_payload_size = random.randint(MIN_PAYLOAD_SIZE, MAX_PAYLOAD_SIZE_LIMIT)
-        print(f"Encoding frame {frame_index}: {img_path.name}, MaxPayload={max_payload_size}")
-
-        # Encode image into NAL units
+        print(f"Encoding frame {frame_index}: {img_path.name}, Timestamp={frame_timestamp}, MaxPayload={max_payload_size}")
+        
         nal_units = encode_image_to_nalus(img_path, codec=codec)
-
+        
         for idx, nalu in enumerate(nal_units):
             marker = 1 if idx == len(nal_units) - 1 else 0
-            rtp_packets, ipi_iter, timestamp = packetize_nalu(nalu, seq, int(timestamp), ssrc, marker, max_payload_size, ipi_iter)
+            rtp_packets = packetize_nalu(nalu, seq, frame_timestamp, ssrc, marker, max_payload_size)
 
             for rtp, new_seq in rtp_packets:
-
                 eth = Ether(src=server_mac, dst=user_mac)
                 ip = IP(src=server_ip, dst=user_ip)
                 udp = UDP(sport=server_port, dport=user_port)
                 all_packets.append(eth / ip / udp / rtp)
-
                 seq = new_seq
 
-        # Send RTP command packets (backward direction)
+        # After processing all NAL units for this frame, update the timestamp for the next frame
+        if frame_index <= len(ipis):
+            ipi = ipis[frame_index - 1]
+        else:
+            # If we run out of IPI values, use the last one
+            ipi = ipis[-1]
+            
+        timestamp += ipi * rtp_clock_rate
+        print(f"Updated timestamp: {timestamp:.2f} (IPI={ipi:.6f}s)")
+
+        # Process any commands for this frame
         if frame_index in commands:
             for command in commands[frame_index]:
-                ipi_iter = iter(ipis)
-                ipi = next(ipi_iter)
-                old_timestamp = timestamp
-                timestamp += ipi * rtp_clock_rate
-                print(f"Timestamp updated for command: {old_timestamp:.2f} + ({ipi:.6f} × {rtp_clock_rate}) = {timestamp:.2f}")
                 rtp_command = RTP(version=2, padding=0, extension=0, marker=1,
                                   payload_type=97, sequence=seq % 65536,
                                   timestamp=int(timestamp), sourcesync=ssrc) / Raw(load=command.encode())
@@ -232,9 +224,6 @@ def create_rtp_packets(codec=DEFAULT_CODEC):
                 print(f"Executing command for frame {frame_index}: {command}")
                 seq += 1
 
-    # You can optionally save the packets to a PCAP file here
-    # wrpcap(output_pcap, all_packets)
-    print(f"RTP packet stream generation complete. Total packets: {len(all_packets)}")
     print(f"Writing {len(all_packets)} packets to {output_pcap}")
     wrpcap(output_pcap, all_packets, nano=True)
 
