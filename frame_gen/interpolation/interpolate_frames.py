@@ -429,9 +429,9 @@ def main():
     args = parser.parse_args()
     
     # Set up paths
-    frame_gen_dir = Path(__file__).parent.parent  # Go up one level to frame_gen
-    original_folder = frame_gen_dir / 'rescaling' / f'downscaled_original_frames_from_1920_1080_to_{args.res.replace("x", "_")}'
-    processed_folder = frame_gen_dir / 'interpolation' / f'processed_frames_{args.method}_{args.res.replace("x", "_")}'
+    frame_gen_dir = Path(__file__).parent  # Use the interpolation directory as base
+    original_folder = frame_gen_dir.parent / 'rescaling' / f'downscaled_original_frames_from_1920_1080_to_{args.res.replace("x", "_")}'
+    processed_folder = frame_gen_dir / f'processed_frames_{args.method}_{args.res.replace("x", "_")}'
     
     print(f"Original folder: {original_folder}")
     print(f"Processed folder: {processed_folder}")
@@ -446,7 +446,7 @@ def main():
     if args.generate_video == 'yes':
         # Calculate target FPS based on exp
         target_fps = args.original_fps * (2**args.exp)
-        output_video = frame_gen_dir / 'interpolation' / f'interpolated_{args.method}_{args.res.replace("x", "_")}_{target_fps}fps.mp4'
+        output_video = frame_gen_dir / f'interpolated_{args.method}_{args.res.replace("x", "_")}_{target_fps}fps.mp4'
         create_video_from_frames(processed_folder, output_video, target_fps)
 
 if __name__ == "__main__":
