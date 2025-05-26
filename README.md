@@ -135,9 +135,10 @@ pip install -r frame_gen/tools/requirements_tools.txt
    - Usage: `streamlit run frame_gen/tools/real_time_quality_metrics.py`
 
 3. **Mean Opinion Score (MOS) Evaluation** (`frame_gen/tools/mean_opinion_score_video_pairs.py`)
-   - Tool for subjective quality evaluations
+   - Tool for subjective quality evaluations (QoE - Quality of Experience)
    - Randomizes video pair order
    - Collects ratings and comments
+   - For more details on the QoE subjective evaluation methodology and results, refer to [cgreplay_demo](https://github.com/arielgoes/cgreplay_demo)
    - Usage: `python frame_gen/tools/mean_opinion_score_video_pairs.py`
 
 4. **Video Utilities** (`frame_gen/tools/video_utils.py`)
