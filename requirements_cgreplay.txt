@@ -1,0 +1,14 @@
+PyYAML==6.0.1
+numpy==1.26.4
+opencv-python==4.10.0.84
+mss==9.0.2
+qrcode==7.4.2
+pillow==10.2.0
+pyzbar==0.1.9
+#pandas==2.1.4+dfsg
+pandas==2.2.3
+tzdata>=2022.1
+six>=1.5
+pytz>=2020.1
+python-dateutil>=2.8.2
+PyGObject==3.48.2
