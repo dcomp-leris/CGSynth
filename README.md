@@ -26,6 +26,54 @@ sudo apt install python3.8 python3.8-venv python3.8-dev
 #### For Quality Metrics Tools
 The quality metrics tools require Python 3.12.2. See the Quality Metrics Tools section for setup instructions.
 
+#### OpenCV with GStreamer Support
+The CGReplay player component requires OpenCV built with GStreamer support to properly handle video streams. Pre-built packages from pip typically lack this support, so you'll need to build OpenCV from source:
+
+1. First, install the necessary dependencies:
+```bash
+sudo apt-get install -y build-essential cmake git pkg-config \
+    libgtk-3-dev libavcodec-dev libavformat-dev libswscale-dev \
+    libv4l-dev libxvidcore-dev libx264-dev libjpeg-dev \
+    libpng-dev libtiff-dev gfortran openexr \
+    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+    python3-dev python3-numpy libatlas-base-dev
+```
+
+2. Clone the OpenCV repositories:
+```bash
+mkdir -p ~/opencv_build && cd ~/opencv_build
+git clone https://github.com/opencv/opencv.git
+git clone https://github.com/opencv/opencv_contrib.git
+```
+
+3. Configure the build with CMake (adjust paths to match your environment):
+```bash
+mkdir -p ~/opencv_build/build && cd ~/opencv_build/build
+cmake -D CMAKE_BUILD_TYPE=RELEASE \
+      -D CMAKE_INSTALL_PREFIX=/path/to/your/virtualenv \
+      -D INSTALL_PYTHON_EXAMPLES=ON \
+      -D INSTALL_C_EXAMPLES=OFF \
+      -D OPENCV_ENABLE_NONFREE=ON \
+      -D WITH_GSTREAMER=ON \
+      -D OPENCV_EXTRA_MODULES_PATH=~/opencv_build/opencv_contrib/modules \
+      -D BUILD_EXAMPLES=ON \
+      -D PYTHON_EXECUTABLE=/path/to/your/virtualenv/bin/python \
+      -D PYTHON_DEFAULT_EXECUTABLE=/path/to/your/virtualenv/bin/python \
+      ../opencv
+```
+
+4. Build and install (replace `8` with the number of CPU cores you want to use):
+```bash
+make -j8
+make install
+```
+
+5. Verify that OpenCV has GStreamer support:
+```bash
+python -c "import cv2; print(cv2.getBuildInformation())" | grep -i gstreamer
+```
+   You should see `GStreamer: YES` in the output.
+
 ## Project Components
 
 ### 1. RTP Video Tools
@@ -162,3 +210,8 @@ For detailed usage instructions of each quality metrics tool, please refer to th
 - For extraction problems, verify that the PCAP contains valid RTP packets with H.264/H.265 payload
 - Malformed or incomplete packets in the PCAP file may result in corrupted video output
 - For quality metrics tools, ensure you have the correct Python version and all dependencies installed
+- For the CGReplay server and player:
+  - When a game is specified in `config.yaml` (under `Running:game`), ensure a folder with the same name exists in the `server/` directory (e.g., if game is set to "Kombat", you need a `server/Kombat/` folder)
+  - The game folder must contain frames in sequential order
+  - Both `player/` and `server/` directories must have a `logs` folder created in them for proper operation
+  - The OpenCV in your Python environment must have GStreamer support (see OpenCV with GStreamer Support section)
