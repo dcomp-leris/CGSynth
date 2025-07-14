@@ -213,5 +213,157 @@ For detailed usage instructions of each quality metrics tool, please refer to th
 - For the CGReplay server and player:
   - When a game is specified in `config.yaml` (under `Running:game`), ensure a folder with the same name exists in the `server/` directory (e.g., if game is set to "Kombat", you need a `server/Kombat/` folder)
   - The game folder must contain frames in sequential order
-  - Both `player/` and `server/` directories must have a `logs` folder created in them for proper operation
+   - Both `player/` and `server/` directories must have a `logs` folder created in them for proper operation
+
+## Installing FFmpeg with VMAF Support
+
+VMAF (Video Multi-Method Assessment Fusion) is a perceptual video quality metric developed by Netflix. To use VMAF-based quality metrics in this project, you need to build and install both libvmaf and ffmpeg with VMAF support. This section provides step-by-step instructions for Ubuntu 22.04/24.04 (adapt as needed for your system).
+
+### 1. Install Build Dependencies
+
+```bash
+sudo apt update
+sudo apt install -y git build-essential pkg-config libtool \
+    libssl-dev yasm cmake python3-venv meson ninja-build nasm \
+    libass-dev libfreetype6-dev libtheora-dev libvorbis-dev \
+    libx264-dev libx265-dev libnuma-dev
+```
+
+### 2. Clone and Build libvmaf
+
+```bash
+git clone https://github.com/Netflix/vmaf.git
+cd vmaf
+make
+sudo make install
+sudo ldconfig
+cd ..
+```
+
+### 3. Clone and Build ffmpeg with VMAF Support
+
+```bash
+git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg
+cd ffmpeg
+./configure --enable-gpl --enable-libx264 --enable-libx265 --enable-libvmaf
+make -j$(nproc)
+sudo make install
+cd ..
+```
+
+### 4. Verify VMAF Support in ffmpeg
+
+You can verify that ffmpeg was built with VMAF support by running:
+
+```bash
+ffmpeg -filters | grep vmaf
+```
+
+You should see output similar to:
+
+```
+.. libvmaf           VV->V      Calculate the VMAF between two video streams.
+.. vmafmotion        V->V       Calculate the VMAF Motion score.
+```
+
+### 5. Example Usage
+
+To compute the VMAF score between two videos:
+
+```bash
+ffmpeg -i reference.mp4 -i distorted.mp4 -lavfi "[0:v][1:v]libvmaf" -f null -
+```
+
+This will print VMAF scores to the console.
+
+**Tip:** For more advanced usage and options, refer to the official [FFmpeg VMAF documentation](https://ffmpeg.org/ffmpeg-filters.html#libvmaf).
+
+### Troubleshooting VMAF/FFmpeg Build
+
+- **Missing `nasm` or build tools:**
+  - If you see errors about `nasm` not found, install it with:
+    ```bash
+    sudo apt install nasm
+    ```
+  - For `meson`, `ninja`, or `python3-venv` errors, install with:
+    ```bash
+    sudo apt install meson ninja-build python3-venv
+    ```
+
+- **libvmaf build fails with missing dependencies:**
+  - Make sure all dependencies listed above are installed.
+  - If you get errors related to Python or Meson, try recreating the virtual environment:
+    ```bash
+    python3 -m venv .venv
+    source .venv/bin/activate
+    pip install meson ninja
+    make clean
+    make
+    ```
+
+- **libvmaf package not available in your distribution:**
+  - Building from source (as shown above) is the recommended approach and ensures you get the latest version.
+
+- **`ninja: error: loading 'build.ninja': No such file or directory`**
+  - This means the Meson setup step failed. Try running:
+    ```bash
+    .venv/bin/meson setup libvmaf/build libvmaf --buildtype release -Denable_float=true
+    .venv/bin/meson compile -C libvmaf/build
+    sudo .venv/bin/meson install -C libvmaf/build
+    ```
+
+- **ffmpeg does not detect libvmaf:**
+  - Make sure `sudo ldconfig` was run after installing libvmaf.
+  - Ensure `--enable-libvmaf` was passed to `./configure` when building ffmpeg.
+  - If you installed ffmpeg before libvmaf, rebuild ffmpeg after installing libvmaf.
+
+- **General advice:**
+  - Always check the output of each command for errors.
+  - Consult the official documentation for [libvmaf](https://github.com/Netflix/vmaf) and [ffmpeg](https://ffmpeg.org/).
+
+## Practical Usage: ffmpeg with VMAF
+
+VMAF is a video quality metric designed to compare a reference (original) video with a distorted (processed or compressed) video. It does not generate a new video; instead, it outputs a quality score or report.
+
+### Basic Usage: Compare Two Videos
+
+Suppose you have:
+- `reference.mp4`: the original, high-quality video
+- `distorted.mp4`: the video to evaluate (e.g., after compression)
+
+Run:
+
+```bash
+ffmpeg -i reference.mp4 -i distorted.mp4 -lavfi "[0:v][1:v]libvmaf" -f null -
+```
+
+This will print VMAF scores to the terminal.
+
+### Save VMAF Results as JSON
+
+```bash
+ffmpeg -i reference.mp4 -i distorted.mp4 \
+  -lavfi "[0:v][1:v]libvmaf=log_path=vmaf.json:log_fmt=json" -f null -
+```
+
+This writes detailed results to `vmaf.json`.
+
+### Compare Videos of Different Resolutions
+
+If the videos have different resolutions, scale them to match:
+
+```bash
+ffmpeg -i reference.mp4 -i distorted.mp4 \
+  -lavfi "[0:v]scale=1920:1080[ref];[1:v]scale=1920:1080[dist];[ref][dist]libvmaf" \
+  -f null -
+```
+
+### Tips
+- The videos must have the same frame count and be synchronized.
+- Use `-an` to ignore audio streams if needed.
+- You can add other metrics (e.g., `feature=name=psnr`) to the filter.
+- For more options, see:
+  - [FFmpeg libvmaf filter documentation](https://ffmpeg.org/ffmpeg-filters.html#libvmaf)
+  - [Netflix VMAF GitHub](https://github.com/Netflix/vmaf)
+
   - The OpenCV in your Python environment must have GStreamer support (see OpenCV with GStreamer Support section)
