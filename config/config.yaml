@@ -6,6 +6,7 @@ server:
     server_port: 5000                    # UDP Port for receiving control (Joystick) commands from player
     server_command_port: 5001            # not used yet!
     server_interface: "server-eth0"      # Not Mandatory!
+    socket_timeout: 0.0001
     ##CGServerLog
     log_rate_control: "./logs/srv_ratectl.txt"
     log_server: "./logs/srv_total.txt"
@@ -43,8 +44,8 @@ encoding:
     name: "H.264" # Default 
     fps: 30  # Frames per second
     resolution:
-        width: 600 # default 1364
-        height: 400 # default 768
+        width: 1364 # default 1364
+        height: 768 # default 768
     starting_bitrate: 5000
     bitrate_min: 4000
     bitrate_max: 10000

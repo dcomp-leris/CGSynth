@@ -32,6 +32,7 @@ cg_server_ipadress = config["server"]["server_IP"]  # CG Server IP address
 rate_control_log = config["server"]["log_rate_control"]     # Logging the Encoding (H.264) Rate Control 
 server_log = config["server"]["log_server"]                 # Logging the Rate, FPS, CMD Rate .. Main Log
 frame_log = config["server"]["log_frame"]                   # Logging current_srv_fps, processing_time, bitrate 
+cg_server_socket_timeout = config["server"]["socket_timeout"]
 
 # Loading CG Gamer or Player Setup****************************************************************************** 
 player_ip = config['gamer']["player_IP"]                     # CG Gamer IP address
@@ -292,8 +293,9 @@ def stream_frames(game_name):
         print(f"Streaming frame {frame_id}")
         with open(frame_log, "a") as f: f.write(f"{frame_id},{current_srv_fps},{processing_time},{bitrate}\n")
         
-        # new code
-        timeout = 0.0001 # if not flag_lock else None
+        # Socket Time out 
+        timeout = cg_server_socket_timeout ## socket timeout is set in config file!
+        #timeout = 0.0001 # if not flag_lock else None
         ready_to_read, _, _ = select.select([control_socket], [], [], timeout) #0.01)  # 10 milliseconds timeout         
         received_fame_id = 0 
 

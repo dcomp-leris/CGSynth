@@ -159,8 +159,54 @@ else:
 cap = cv2.VideoCapture(gstreamer_pipeline, cv2.CAP_GSTREAMER)
 
 if not cap.isOpened():
-    print("Error: Could not open video stream")
-    exit()
+    print("❌ ERROR: Could not open video stream")
+    print("\nDETAILED DIAGNOSTICS:")
+    print("-" * 30)
+    
+    # Try to get more info about the failure
+    print("Possible causes:")
+    print("1. ❌ OpenCV not compiled with GStreamer support")
+    print("2. ❌ GStreamer plugins missing")
+    print("3. ❌ Network/port issues")
+    print("4. ❌ No video stream available on specified port")
+    print("5. ❌ Pipeline syntax errors")
+    
+    print(f"\nTROUBLESHOOTING STEPS:")
+    print("-" * 30)
+    print("1. Test if video stream is available:")
+    print(f"   gst-launch-1.0 udpsrc port={player_port} ! fakesink dump=true")
+    
+    print("\n2. Test pipeline manually:")
+    print(f"   gst-launch-1.0 {gstreamer_pipeline.replace('appsink', 'autovideosink')}")
+    
+    print("\n3. Check network connectivity:")
+    print(f"   netstat -ulnp | grep {player_port}")
+    
+    print("\n4. Install missing GStreamer plugins:")
+    print("   sudo apt-get install gstreamer1.0-plugins-base gstreamer1.0-plugins-good")
+    print("   sudo apt-get install gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly")
+    
+    print("\n5. Rebuild OpenCV with GStreamer:")
+    print("   pip uninstall opencv-python")
+    print("   pip install opencv-contrib-python")
+
+    
+    cap.release()
+    exit(1)
+else:
+    print("✅ SUCCESS: Video stream opened successfully!")
+    
+    # Test frame reading
+    print("Testing frame capture...")
+    ret, test_frame = cap.read()
+    if ret and test_frame is not None:
+        print(f"✅ Successfully captured test frame: {test_frame.shape}")
+    else:
+        print("⚠️  Warning: Could not read initial frame (stream might not be active yet)")
+    
+    print("\n" + "="*60)
+    print("STARTING MAIN VIDEO PROCESSING LOOP")
+    print("="*60)
 
 
 # frame_buffer = deque(maxlen=30)  # Buffer to store frames
