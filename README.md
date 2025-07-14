@@ -341,12 +341,18 @@ This will print VMAF scores to the terminal.
 
 ### Save VMAF Results as JSON
 
+To generate a JSON file with detailed VMAF statistics (including per-frame scores and the mean), use:
+
 ```bash
 ffmpeg -i reference.mp4 -i distorted.mp4 \
   -lavfi "[0:v][1:v]libvmaf=log_path=vmaf.json:log_fmt=json" -f null -
 ```
 
-This writes detailed results to `vmaf.json`.
+This will create a file called `vmaf.json` containing:
+- The VMAF score for each frame
+- The mean (average) VMAF score and other summary statistics
+
+You can use this JSON file for further analysis or plotting with Python, Excel, or other tools.
 
 ### Compare Videos of Different Resolutions
 
