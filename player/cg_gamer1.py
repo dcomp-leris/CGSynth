@@ -226,6 +226,13 @@ while True:
     # Try to receive the next frame
     ret, frame = cap.read()
     frm_rcv = time.perf_counter() # time.time() * 1000
+    
+    # Robust handling for empty frames
+    if not ret or frame is None or frame.size == 0:
+        print("[WARNING] Empty frame received or failed to capture frame. Skipping this iteration.")
+        time.sleep(0.01)
+        continue
+
     #test_timestamp = cap.get(cv2.CAP_PROP_POS_MSEC)
     #print("Debug:***************",test_timestamp)
 
