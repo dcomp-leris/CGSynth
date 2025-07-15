@@ -48,6 +48,6 @@ if __name__ == "__main__":
     player1_process.start()
     tshark_process.start()
 
-    # Wait for both to complete
+    # Wait for player to finish
     player1_process.join()
     tshark_process.join()
