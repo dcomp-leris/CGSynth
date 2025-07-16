@@ -6,7 +6,7 @@
 # Gamer: (1) 
 '''
 
-import cv2, os, socket, time, yaml, threading, subprocess
+import cv2, os, socket, time, yaml, threading, subprocess, glob, shutil
 import pandas as pd
 from datetime import datetime
 from pyzbar import pyzbar
@@ -99,6 +99,105 @@ if live_watching == True:
 
 # Load autocommand.txt
 sync_df = load_syncfile(sync_file)
+
+# Function to ensure log directory exists and clean log files
+def ensure_logs_directory_and_clean():
+    # Get the directory paths from the config
+    log_dirs = [os.path.dirname(rate_log), 
+                os.path.dirname(time_log)]
+    
+    # Add received_frames directory
+    log_dirs.append(received_frames)
+    
+    # Remove duplicates
+    log_dirs = list(set(log_dirs))
+    
+    for log_dir in log_dirs:
+        # Create directory if it doesn't exist
+        if not os.path.exists(log_dir):
+            print(f"Creating log directory: {log_dir}")
+            try:
+                os.makedirs(log_dir, exist_ok=True)
+                # Ensure directory has proper permissions (readable/writable by all)
+                os.chmod(log_dir, 0o777)  # rwxrwxrwx permissions
+                print(f"Set permissions for: {log_dir}")
+            except Exception as e:
+                print(f"Error creating directory {log_dir}: {e}")
+        else:
+            # If directory exists, ensure it has proper permissions
+            try:
+                os.chmod(log_dir, 0o777)  # rwxrwxrwx permissions
+                print(f"Updated permissions for existing directory: {log_dir}")
+            except Exception as e:
+                print(f"Error updating permissions for {log_dir}: {e}")
+        
+        # Clean existing log files
+        print(f"Cleaning log files in: {log_dir}")
+        
+        # For text log files
+        if log_dir == os.path.dirname(rate_log) or log_dir == os.path.dirname(time_log):
+            log_files = glob.glob(os.path.join(log_dir, '*.txt'))
+            for log_file in log_files:
+                try:
+                    os.remove(log_file)
+                    print(f"Deleted: {log_file}")
+                except Exception as e:
+                    print(f"Error deleting {log_file}: {e}")
+            
+            # Create empty log files to ensure they exist and are writable
+            if log_dir == os.path.dirname(rate_log):
+                try:
+                    with open(rate_log, 'w') as f:
+                        f.write("# Frame ID, FPS, CPS\n")
+                    os.chmod(rate_log, 0o666)  # rw-rw-rw- permissions
+                    print(f"Created empty log file: {rate_log}")
+                except Exception as e:
+                    print(f"Error creating log file {rate_log}: {e}")
+            
+            if log_dir == os.path.dirname(time_log):
+                try:
+                    with open(time_log, 'w') as f:
+                        f.write("# Frame ID, Frame Timestamp, Command Timestamp\n")
+                    os.chmod(time_log, 0o666)  # rw-rw-rw- permissions
+                    print(f"Created empty log file: {time_log}")
+                except Exception as e:
+                    print(f"Error creating log file {time_log}: {e}")
+        
+        # For received frames directory - clean ALL files
+        if log_dir == received_frames:
+            print(f"Cleaning received_frames directory: {log_dir}")
+            # First, clean files with extensions
+            frame_files = glob.glob(os.path.join(log_dir, '*.*'))
+            # Also clean files without extensions
+            frame_files_no_ext = glob.glob(os.path.join(log_dir, '*'))
+            # Combine both lists
+            all_files = list(set(frame_files + frame_files_no_ext))
+            
+            if len(all_files) > 0:
+                print(f"Found {len(all_files)} files to delete in {log_dir}")
+                for frame_file in all_files:
+                    # Skip if it's the directory itself
+                    if os.path.isdir(frame_file):
+                        continue
+                    try:
+                        os.remove(frame_file)
+                        print(f"Deleted frame: {frame_file}")
+                    except Exception as e:
+                        print(f"Error deleting frame {frame_file}: {e}")
+            else:
+                print(f"No files found in {log_dir} - directory already clean")
+                
+            print(f"Finished cleaning received_frames directory: {log_dir}")
+            # Double check it's empty
+            remaining = glob.glob(os.path.join(log_dir, '*'))
+            if len(remaining) > 0 and not all(os.path.isdir(f) for f in remaining):
+                print(f"WARNING: {len(remaining)} files still remain in {log_dir}")
+            else:
+                print(f"SUCCESS: received_frames directory is now clean")
+
+
+# Ensure log directories exist and clean log files
+ensure_logs_directory_and_clean()
 
 # kill all ports
 subprocess.run("../port_clean.sh")

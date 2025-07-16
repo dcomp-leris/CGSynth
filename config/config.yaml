@@ -64,7 +64,7 @@ sync:
 # ---------------------------------------------------------------------------------------#
 # CGReplay Running Setup
 Running:
-    game: "Forza"     # Set it to start the CGReplay specific Game
+    game: "Kombat"     # Set it to start the CGReplay specific Game
     live_watching: True    # If you want to watch live gameplay set 'True' else set 'False'
     duration: 300   # in seconds
     stop_frm_number: 100

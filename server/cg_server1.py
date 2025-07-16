@@ -5,7 +5,7 @@
 # This is Configured for Netsoft 2025 Conference!
 '''
 
-import os , sys, time, socket, select, subprocess, cv2, qrcode, gi, hashlib, yaml 
+import os , sys, time, socket, select, subprocess, cv2, qrcode, gi, hashlib, yaml, glob, shutil
 import numpy as np, pandas as pd
 
 
@@ -460,7 +460,77 @@ def load_config(file_path="config.txt"):
                 config[key] = value
     return config
 
+# Function to ensure log directory exists and clean log files
+def ensure_logs_directory_and_clean():
+    # Get the directory paths from the config
+    log_dirs = [os.path.dirname(rate_control_log), 
+                os.path.dirname(server_log), 
+                os.path.dirname(frame_log)]
+    
+    # Remove duplicates
+    log_dirs = list(set(log_dirs))
+    
+    for log_dir in log_dirs:
+        # Create directory if it doesn't exist
+        if not os.path.exists(log_dir):
+            print(f"Creating log directory: {log_dir}")
+            try:
+                os.makedirs(log_dir, exist_ok=True)
+                # Ensure directory has proper permissions (readable/writable by all)
+                os.chmod(log_dir, 0o777)  # rwxrwxrwx permissions
+                print(f"Set permissions for: {log_dir}")
+            except Exception as e:
+                print(f"Error creating directory {log_dir}: {e}")
+        else:
+            # If directory exists, ensure it has proper permissions
+            try:
+                os.chmod(log_dir, 0o777)  # rwxrwxrwx permissions
+                print(f"Updated permissions for existing directory: {log_dir}")
+            except Exception as e:
+                print(f"Error updating permissions for {log_dir}: {e}")
+        
+        # Clean existing log files
+        print(f"Cleaning log files in: {log_dir}")
+        log_files = glob.glob(os.path.join(log_dir, '*.txt'))
+        for log_file in log_files:
+            try:
+                os.remove(log_file)
+                print(f"Deleted: {log_file}")
+            except Exception as e:
+                print(f"Error deleting {log_file}: {e}")
+        
+        # Create empty log files to ensure they exist and are writable
+        if log_dir == os.path.dirname(rate_control_log):
+            try:
+                with open(rate_control_log, 'w') as f:
+                    f.write("# Frame ID, Rate Control\n")
+                os.chmod(rate_control_log, 0o666)  # rw-rw-rw- permissions
+                print(f"Created empty log file: {rate_control_log}")
+            except Exception as e:
+                print(f"Error creating log file {rate_control_log}: {e}")
+        
+        if log_dir == os.path.dirname(server_log):
+            try:
+                with open(server_log, 'w') as f:
+                    f.write("# Frame ID, Received Frame ID, Gap, Received Time, Send Time, Server FPS, Received FPS, Server CPS, Received CPS, FPS Ratio, CPS Ratio, Bitrate\n")
+                os.chmod(server_log, 0o666)  # rw-rw-rw- permissions
+                print(f"Created empty log file: {server_log}")
+            except Exception as e:
+                print(f"Error creating log file {server_log}: {e}")
+        
+        if log_dir == os.path.dirname(frame_log):
+            try:
+                with open(frame_log, 'w') as f:
+                    f.write("# Frame ID, Current Server FPS, Processing Time, Bitrate\n")
+                os.chmod(frame_log, 0o666)  # rw-rw-rw- permissions
+                print(f"Created empty log file: {frame_log}")
+            except Exception as e:
+                print(f"Error creating log file {frame_log}: {e}")
+
 if __name__ == "__main__":
+    # Ensure log directory exists and clean log files
+    ensure_logs_directory_and_clean()
+    
     # Load configurations from the config.txt file
     # Call the stream_frames function
     print(f'Started streaming to {cg_server_port}... ')
