@@ -12,7 +12,7 @@ def run_player1():
 def run_tshark():
     """Run tshark command that requires sudo privileges."""
     pcap_tmp = "/tmp/mypcap.pcap"
-    pcap_dest = os.path.join(os.getcwd(), "mypcap.pcap")
+    pcap_dest = os.path.join(os.path.dirname(os.getcwd()), "mypcap.pcap")
     cmd = ["tshark", "-i", "cgplayer-eth0", "-w", pcap_tmp]
     try:
         subprocess.run(cmd, check=True)

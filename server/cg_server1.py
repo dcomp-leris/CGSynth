@@ -50,7 +50,7 @@ resolution_width = config["encoding"]["resolution"]["width"]    # Width
 resolution_height = config["encoding"]["resolution"]["height"]  # Height
 
 # Loading Protocols Setup **************************************************************************************
-scream_state=config["protocols"]["SCReAM"]                      #  CCA Protocol for UDP as SCReAM developed by Ericsson!
+scream_state=config["protocols"]["SCReAM"]                      # CCA Protocol for UDP as SCReAM developed by Ericsson!
 scream_sender=config["protocols"]["sender"]                     # Sender as CGServer!
 
 
@@ -318,9 +318,26 @@ def stream_frames(game_name):
             #print(received_type)
             print(f"Received control data: Type ({received_type}) Time = {send_time}, from {addr}")
             #print(f"Debug: {received_cmd} | Number: {cmd_number}")
-            my_gap = frame_id - received_fame_id # to check the window 
+
+
+
+
+
+
+            my_gap = max((frame_id - received_fame_id),0) # to check the window 
             Nack_counter = 0
             rate_ctl = [None , None, None, None]
+
+
+            """
+            Logging the received data
+            """
+            with open(server_log, "a") as f: 
+                f.write(f"{frame_id},{received_fame_id},{my_gap},{received_time},{send_time},{current_srv_fps},{received_fps},{current_cps},{received_cps},{current_srv_fps/received_fps},{received_cps/current_cps},{bitrate} \n")
+                print("Total is logging!")
+
+
+
             if received_type=='Ack':
                 rate_ctl = [None , None, None, None]
                 rate_ctl[3] = 'Ack'
@@ -409,11 +426,14 @@ def stream_frames(game_name):
                         f" player cps = {received_cps} | server cps = {current_cps}, , rate = {bitrate} ") 
                     
 
-                    with open(server_log, "a") as f: 
-                        f.write(f"{frame_id},{received_fame_id},{my_gap},{received_time},{send_time},{current_srv_fps},{received_fps},{current_cps},{received_cps},{current_srv_fps/received_fps},{received_cps/current_cps},{bitrate} \n")
-
+                    #with open(server_log, "a") as f: 
+                        #f.write(f"{frame_id},{received_fame_id},{my_gap},{received_time},{send_time},{current_srv_fps},{received_fps},{current_cps},{received_cps},{current_srv_fps/received_fps},{received_cps/current_cps},{bitrate} \n")
+                        #print("Total is logging!")
             
                     state = [None , None]
+
+
+
 
             with open(rate_control_log, "a") as f: f.write(f"{frame_id},{rate_ctl}\n")        
         
