@@ -162,6 +162,9 @@ def stream_frames(game_name):
     # setup Synchronization sliding window min & max
     window_min = config["sync"]["window_min"] # 1 
     window_max = config["sync"]["window_max"] # 4
+    
+    # QR code configuration
+    qr_code_enabled = config["Running"]["qr_code_enabled"]
  
 
     cmd_previous_time =  time.perf_counter()
@@ -266,17 +269,18 @@ def stream_frames(game_name):
         # Resize frame to the desired resolution
         frame = cv2.resize(frame, resolution)
 
+        # Conditionally embed QR code based on configuration
+        if qr_code_enabled:
+            qr_data = f"Frame ID: {frame_id}, rcv_timestamp: {timestamp}, resolution: {resolution},bitrate:{bitrate}"
+            qr_img = generate_qr_code(qr_data)
+            
+            qr_size = 200 #100  # QR code size in pixels
+            qr_img = cv2.resize(qr_img, (qr_size, qr_size))
 
-        qr_data = f"Frame ID: {frame_id}, rcv_timestamp: {timestamp}, resolution: {resolution},bitrate:{bitrate}"
-        qr_img = generate_qr_code(qr_data)
-        
-        qr_size = 200 #100  # QR code size in pixels
-        qr_img = cv2.resize(qr_img, (qr_size, qr_size))
-
-        # Overlay the QR code onto the bottom-right corner of the frame
-        x_offset = frame.shape[1] - qr_size - 10  # 10px padding from the right edge
-        y_offset = frame.shape[0] - qr_size - 10  # 10px padding from the bottom edge
-        frame[y_offset:y_offset + qr_size, x_offset:x_offset + qr_size] = qr_img
+            # Overlay the QR code onto the bottom-right corner of the frame
+            x_offset = frame.shape[1] - qr_size - 10  # 10px padding from the right edge
+            y_offset = frame.shape[0] - qr_size - 10  # 10px padding from the bottom edge
+            frame[y_offset:y_offset + qr_size, x_offset:x_offset + qr_size] = qr_img
 
         # Convert frame to bytes and push to GStreamer
         gst_buffer = Gst.Buffer.new_wrapped(frame.tobytes())
@@ -365,23 +369,32 @@ def stream_frames(game_name):
             elif received_type=='Nack':
                 rate_ctl = [None, None, None, None]
                 rate_ctl[3] = 'command'
-                if Nack_counter == 0:
-                    #print(f'(Nack) ==> Received Frame is {received_fame_id}')
-                    print(f'(Nack) [Not Sync: (Decrease & lagged!)] ==> Frame ID is {frame_id} with Gap {my_gap} \n [player fps = {received_fps}] [server fps = {current_srv_fps}] \n [player cps = {received_cps} [server cps = {current_cps}]] | bitrate = {bitrate}')
-                    bitrate = bitrate - (bitrate * 0.2) if bitrate_min <= bitrate <= bitrate_max else bitrate
-                    idx = received_fame_id - my_gap # Create the lag! 
-                    #time.sleep(0.0001)
-                    Nack_counter = Nack_counter + 1
-                    rate_ctl = ['Rate Fall & lagged', [0.2,1], bitrate,rate_ctl[3]]
-                    
-
+                
+                # Only process QR-related NACKs when QR codes are enabled
+                if qr_code_enabled:
+                    if Nack_counter == 0:
+                        #print(f'(Nack) ==> Received Frame is {received_fame_id}')
+                        print(f'(Nack) [QR Code Not Readable: Rate Decrease] ==> Frame ID is {frame_id} with Gap {my_gap} \n [player fps = {received_fps}] [server fps = {current_srv_fps}] \n [player cps = {received_cps} [server cps = {current_cps}]] | bitrate = {bitrate}')
+                        bitrate = bitrate - (bitrate * 0.2) if bitrate_min <= bitrate <= bitrate_max else bitrate
+                        # FIXED: Don't manipulate idx to avoid retransmitting all frames
+                        # idx = received_fame_id - my_gap # This was causing the bug!
+                        #time.sleep(0.0001)
+                        Nack_counter = Nack_counter + 1
+                        rate_ctl = ['QR NACK Rate Fall', [0.2,1], bitrate,rate_ctl[3]]
+                        
+                    else:
+                        print(f'(Nack) [QR Code Not Readable: Fast Rate Decrease] ==> Frame ID is {frame_id} with Gap {my_gap} \n [player fps = {received_fps}] [server fps = {current_srv_fps}] \n [player cps = {received_cps} [server cps = {current_cps}]] | bitrate = {bitrate}')
+                        bitrate = bitrate - (bitrate * 0.5) if bitrate_min <= bitrate <= bitrate_max else bitrate
+                        # FIXED: Don't manipulate idx to avoid retransmitting all frames
+                        # idx = received_fame_id - my_gap # This was causing the bug!
+                        #time.sleep(0.0001)
+                        Nack_counter = Nack_counter + 1
+                        rate_ctl = ['QR NACK Fast Decrease', [0.5,my_gap], bitrate,rate_ctl[3]]
                 else:
-                    print(f'(Nack) [Fast Decrease & lagged!] ==> Frame ID is {frame_id} with Gap {my_gap} \n [player fps = {received_fps}] [server fps = {current_srv_fps}] \n [player cps = {received_cps} [server cps = {current_cps}]] | bitrate = {bitrate}')
-                    bitrate = bitrate - (bitrate * 0.5) if bitrate_min <= bitrate <= bitrate_max else bitrate
-                    idx = received_fame_id - my_gap
-                    #time.sleep(0.0001)
-                    Nack_counter = Nack_counter + 1
-                    rate_ctl = ['Fast Decrease & lagged', [0.5,my_gap], bitrate,rate_ctl[3]]
+                    # When QR codes are disabled, ignore QR-related NACKs
+                    print(f'(Nack) [QR Code Disabled: Ignoring NACK] ==> Frame ID is {frame_id} with Gap {my_gap}')
+                    rate_ctl = ['QR Disabled NACK Ignored', [0,0], bitrate,rate_ctl[3]]
+                    
                 #with open(rate_control_log, "a") as f: f.write(f"{frame_id},{rate_ctl}\n")
 
 
