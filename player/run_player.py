@@ -1,4 +1,4 @@
-import os, time
+import os
 import subprocess
 import multiprocessing
 

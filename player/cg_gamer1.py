@@ -48,6 +48,9 @@ player_interface = config["gamer"]["player_interface"]
 # Do you want to watch the Game Video live? 
 live_watching = config["Running"]["live_watching"]
 
+# QR code configuration
+qr_code_enabled = config["Running"]["qr_code_enabled"]
+
 
 
 # Ack Rate
@@ -335,8 +338,6 @@ while True:
     #test_timestamp = cap.get(cv2.CAP_PROP_POS_MSEC)
     #print("Debug:***************",test_timestamp)
 
-    # Read QR code from the buffered frame
-    frame_id, qr_data = read_qr_code_from_frame(frame)
     current_fps = 1/(frm_rcv-frm_previoustime)
     frm_previoustime = frm_rcv
     #print(f"{frame_id}-fps:{current_fps}")
@@ -345,31 +346,49 @@ while True:
     with lock:
         latest_frame = frame.copy()  # Update frame for live display
 
-    if frame_id:
-        print(f"Detected Frame ID: {frame_id}")
+    # Initialize frame_id for both code paths
+    frame_id = None
+    
+    # Conditionally read QR code based on configuration
+    if qr_code_enabled:
+        # Read QR code from the buffered frame
+        frame_id, qr_data = read_qr_code_from_frame(frame)
         
-        if (my_try_counter%ack_freq)==0:
-            send_command(frame_id,current_fps,player_interface,type='Ack', fps = current_fps, cps = currrent_cps )
+        if frame_id:
+            print(f"Detected Frame ID: {frame_id}")
+            
+            if (my_try_counter%ack_freq)==0:
+                send_command(frame_id,current_fps,player_interface,type='Ack', fps = current_fps, cps = currrent_cps )
+            else:
+                pass
+
+            #next_frame = int(frame_id) + 1
+
+            if frame_id == frame_counter+1:
+                frame_filename = f"{received_frames}/{frame_id:04d}_{frm_rcv}.png"
+            else:
+                frame_filename = f"{received_frames}/{frame_id:04d}_{frm_rcv}_retry.png"
+
+            frame_counter = frame_id
+            
         else:
+            print("No QR code detected in this frame.")
+            send_command(0,"Downgrade",type='Nack',fps = current_fps, cps = currrent_cps )   # Send NacK
+            send_command(frame_counter, previous_command,type='command',fps = current_fps, cps = currrent_cps ) # Send the Previous Command
+            #continue
+            #frame_counter+=1
+            frame_filename = f"{received_frames}/{frame_counter:04d}_{frm_rcv}_NoQR.png"
             pass
-
-        #next_frame = int(frame_id) + 1
-
-        if frame_id == frame_counter+1:
-            frame_filename = f"{received_frames}/{frame_id:04d}_{frm_rcv}.png"
-        else:
-            frame_filename = f"{received_frames}/{frame_id:04d}_{frm_rcv}_retry.png"
-
-        frame_counter = frame_id
-        
     else:
-        print("No QR code detected in this frame.")
-        send_command(0,"Downgrade",type='Nack',fps = current_fps, cps = currrent_cps )   # Send NacK
-        send_command(frame_counter, previous_command,type='command',fps = current_fps, cps = currrent_cps ) # Send the Previous Command
-        #continue
-        #frame_counter+=1
+        # QR codes are disabled - process frames without QR code reading
+        print("QR code reading disabled - processing frame without QR detection")
+        frame_counter += 1
+        frame_id = frame_counter  # Set frame_id for logging consistency
         frame_filename = f"{received_frames}/{frame_counter:04d}_{frm_rcv}_NoQR.png"
-        pass 
+        
+        # Send ACK periodically even without QR codes
+        if (my_try_counter%ack_freq)==0:
+            send_command(frame_counter,current_fps,player_interface,type='Ack', fps = current_fps, cps = currrent_cps ) 
     
     
     # Save the current frame to a file
