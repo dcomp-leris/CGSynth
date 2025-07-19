@@ -400,10 +400,13 @@ Examples:
             print(f"Error: Test video file not found: {test_video}")
             sys.exit(1)
     
-    # Create output directory if it doesn't exist
-    output_dir = os.path.dirname(args.output)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    # Ensure that all outputs are stored inside an "evaluation" folder in the current directory
+    evaluation_dir = os.path.join(os.getcwd(), "evaluation")
+    os.makedirs(evaluation_dir, exist_ok=True)
+
+    # Override user-specified path to always reside in the evaluation directory
+    output_filename = os.path.basename(args.output)
+    args.output = os.path.join(evaluation_dir, output_filename)
     
     print(f"Generating quality plots...")
     print(f"Reference: {args.reference_video}")
