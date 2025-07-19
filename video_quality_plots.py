@@ -27,6 +27,10 @@ from scipy import ndimage
 from scipy.stats import entropy
 from tqdm import tqdm
 import warnings
+import subprocess
+import json
+import tempfile
+import math
 warnings.filterwarnings('ignore')
 
 
@@ -141,6 +145,37 @@ def calculate_gradient_magnitude_similarity(img1, img2):
         return 0.0
 
 
+def calculate_vmaf(reference_path, test_path, width, height):
+    """Calculate per-frame VMAF using ffmpeg's libvmaf filter.
+    Returns a numpy array of VMAF scores (one per frame) or an empty array on failure.
+    """
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".json") as tmp_json:
+            json_path = tmp_json.name
+        # Build ffmpeg command
+        scale_str = f"scale={width}:{height}:flags=bicubic"
+        ffmpeg_cmd = [
+            "ffmpeg", "-i", test_path, "-i", reference_path,
+            "-lavfi",
+            f"[0:v]{scale_str}[main];[1:v]{scale_str}[ref];[main][ref]libvmaf=log_path={json_path}:log_fmt=json",
+            "-f", "null", "-", "-y", "-hide_banner", "-loglevel", "error"
+        ]
+        result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode != 0:
+            print(f"Error computing VMAF via ffmpeg: {result.stderr.strip()}")
+            return np.array([])
+        # Parse json
+        with open(json_path, "r") as f:
+            vmaf_json = json.load(f)
+        frame_scores = [frame["metrics"]["vmaf"] for frame in vmaf_json.get("frames", [])]
+        return np.array(frame_scores)
+    except FileNotFoundError:
+        print("ffmpeg not found or not in PATH – skipping VMAF computation.")
+    except Exception as e:
+        print(f"Error calculating VMAF: {e}")
+    return np.array([])
+
+
 def calculate_edge_similarity(img1, img2):
     """Calculate Edge Similarity between two images."""
     try:
@@ -203,7 +238,8 @@ def extract_metrics(reference_path, test_path):
         'nrmse': [],
         'correlation': [],
         'gms': [],
-        'edge_similarity': []
+        'edge_similarity': [],
+        'vmaf': []
     }
     
     # Process frames
@@ -244,6 +280,11 @@ def extract_metrics(reference_path, test_path):
     # Convert to numpy arrays for easier manipulation
     for key in metrics:
         metrics[key] = np.array(metrics[key])
+
+    # Compute VMAF once per video using ffmpeg (if available)
+    vmaf_scores = calculate_vmaf(reference_path, test_path, width, height)
+    if vmaf_scores.size:
+        metrics['vmaf'] = vmaf_scores
     
     # Print summary statistics
     if len(metrics['psnr']) > 0:
@@ -283,7 +324,8 @@ def plot_metrics(reference_path, test_videos, output_path):
         return False
     
     # Create comprehensive plots
-    fig, axes = plt.subplots(3, 3, figsize=(18, 12))
+    rows = 4  # accommodates up to 12 metrics (3 per row)
+    fig, axes = plt.subplots(rows, 3, figsize=(18, 16))
     fig.suptitle(f'Video Quality Metrics Comparison vs {os.path.basename(reference_path)}', fontsize=16, fontweight='bold')
     
     # Color palette for different videos
@@ -299,11 +341,17 @@ def plot_metrics(reference_path, test_videos, output_path):
         ('nrmse', 'NRMSE', 'Lower is better', False),
         ('correlation', 'Correlation', 'Higher is better', True),
         ('gms', 'Gradient Magnitude Similarity', 'Higher is better', True),
-        ('edge_similarity', 'Edge Similarity', 'Higher is better', True)
+        ('edge_similarity', 'Edge Similarity', 'Higher is better', True),
+        ('vmaf', 'VMAF', 'Higher is better', True)
     ]
+
     
+    axes_flat = axes.flatten()
     for idx, (metric_name, ylabel, description, higher_better) in enumerate(plot_configs):
-        ax = axes[idx // 3, idx % 3]
+        if idx >= len(axes_flat):
+            break
+        ax = axes_flat[idx]
+
         
         ax.set_title(f'{ylabel}\n({description})', fontsize=10, fontweight='bold')
         ax.set_xlabel('Frame Number')
@@ -329,6 +377,10 @@ def plot_metrics(reference_path, test_videos, output_path):
         elif metric_name == 'psnr':
             ax.set_ylim(bottom=0)
     
+    # Hide any unused subplots
+    for j in range(len(plot_configs), len(axes_flat)):
+        fig.delaxes(axes_flat[j])
+
     # Adjust layout and save
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
@@ -338,7 +390,7 @@ def plot_metrics(reference_path, test_videos, output_path):
     csv_path = output_path.replace('.png', '_detailed_metrics.csv')
     with open(csv_path, 'w') as f:
         # Write header
-        header = "Video,Frame,PSNR,SSIM,MSE,RMSE,MAE,NRMSE,Correlation,GMS,Edge_Similarity\n"
+        header = "Video,Frame,PSNR,SSIM,MSE,RMSE,MAE,NRMSE,Correlation,GMS,Edge_Similarity,VMAF\n"
         f.write(header)
         
         # Write data
@@ -346,7 +398,7 @@ def plot_metrics(reference_path, test_videos, output_path):
             num_frames = len(metrics['psnr'])
             for frame in range(num_frames):
                 row = f"{video_name},{frame}"
-                for metric_name in ['psnr', 'ssim', 'mse', 'rmse', 'mae', 'nrmse', 'correlation', 'gms', 'edge_similarity']:
+                for metric_name in ['psnr', 'ssim', 'mse', 'rmse', 'mae', 'nrmse', 'correlation', 'gms', 'edge_similarity', 'vmaf']:
                     if metric_name in metrics:
                         row += f",{metrics[metric_name][frame]:.6f}"
                     else:
