@@ -147,11 +147,20 @@ def run(args):
     # Post-processing: compute quality metrics and generate QoE CSV
     if not args.skip_metrics:
         import subprocess as _sp
+        _cwd = os.path.normpath(os.path.join(_SCRIPT_DIR, ".."))
+
+        # Back up received frames for this mode so later tests don't overwrite them
+        _frames_src = os.path.join(PLAYER_DIR, "received_frames")
+        _frames_dst = os.path.join(PLAYER_DIR, f"received_frames_{args.protocol}")
+        _sp.run(["rm", "-rf", _frames_dst])
+        _sp.run(["cp", "-r", _frames_src, _frames_dst])
+        info(f"*** Backed up received_frames → received_frames_{args.protocol}/\n")
+
         info(f"\n*** Running post-processing (mode={args.protocol}) ...\n")
         result = _sp.run(
             [VENV, os.path.join(_SCRIPT_DIR, "../tools/post_process.py"),
              "--mode", args.protocol],
-            cwd=os.path.normpath(os.path.join(_SCRIPT_DIR, "..")),
+            cwd=_cwd,
         )
         if result.returncode == 0:
             info("*** Metrics saved. Run 'python3 tools/plot_qoe.py' to generate figures.\n")
@@ -160,7 +169,11 @@ def run(args):
 
 
 def _run_quic(h1, h2, args):
-    """Launch CGReplay main scripts with QUIC transport (requires QUIC: True in config.yaml)."""
+    """Launch CGReplay main scripts with QUIC transport."""
+    _config = os.path.join(_SCRIPT_DIR, "../config/config.yaml")
+    os.system(f"sed -i 's/QUIC: False/QUIC: True/' {_config}")
+    os.system(f"sed -i 's/SCReAM: True/SCReAM: False/' {_config}")
+
     info("*** Launching CGReplay server (QUIC mode) on h1...\n")
     h1.cmd(
         f"cd {SERVER_DIR} && "
@@ -177,6 +190,10 @@ def _run_quic(h1, h2, args):
     info("*** Streaming in progress — waiting for completion...\n")
     _wait_for_completion(h2, "/tmp/h2_quic.log", "Receiver finished", timeout=300)
 
+    # Restore config
+    _config = os.path.join(_SCRIPT_DIR, "../config/config.yaml")
+    os.system(f"sed -i 's/QUIC: True/QUIC: False/' {_config}")
+
     # Show tail of logs
     info("\n--- h1 server log (tail) ---\n")
     info(h1.cmd("tail -20 /tmp/h1_quic.log"))
@@ -186,6 +203,10 @@ def _run_quic(h1, h2, args):
 
 def _run_rtp(h1, h2, args):
     """Launch original RTP-based CGReplay server and gamer."""
+    _config = os.path.join(_SCRIPT_DIR, "../config/config.yaml")
+    os.system(f"sed -i 's/QUIC: True/QUIC: False/' {_config}")
+    os.system(f"sed -i 's/SCReAM: True/SCReAM: False/' {_config}")
+
     info("*** Launching RTP server on h1...\n")
     h1.cmd(
         f"cd {SERVER_DIR} && "
@@ -200,7 +221,7 @@ def _run_rtp(h1, h2, args):
     )
 
     info("*** Streaming in progress — waiting for completion...\n")
-    _wait_for_completion(h2, "/tmp/h2_rtp.log", "Received Frame", timeout=300)
+    _wait_for_completion(h2, "/tmp/h2_rtp.log", "RTP streaming complete", timeout=300)
 
     info("\n--- h1 server log (tail) ---\n")
     info(h1.cmd("tail -20 /tmp/h1_rtp.log"))
@@ -210,8 +231,8 @@ def _run_rtp(h1, h2, args):
 
 def _run_scream(h1, h2, args):
     """Launch CGReplay with SCReAM congestion control."""
-    _SCREAM_LIB = os.path.expanduser("~/CGSynth/scream/code/wrapper_lib")
-    _SCREAM_PLUGIN = os.path.expanduser("~/CGSynth/scream/gstscream/target/debug")
+    _SCREAM_LIB = os.path.join(_USER_HOME, "CGSynth/scream/code/wrapper_lib")
+    _SCREAM_PLUGIN = os.path.join(_USER_HOME, "CGSynth/scream/gstscream/target/debug")
     _GST_ENV = (
         f"GST_PLUGIN_PATH={_SCREAM_PLUGIN}:${{GST_PLUGIN_PATH:-}} "
         f"LD_LIBRARY_PATH={_SCREAM_LIB}:${{LD_LIBRARY_PATH:-}}"
@@ -236,7 +257,7 @@ def _run_scream(h1, h2, args):
     )
 
     info("*** Streaming in progress — waiting for completion...\n")
-    _wait_for_completion(h2, "/tmp/h2_scream.log", "Received Frame", timeout=300)
+    _wait_for_completion(h2, "/tmp/h2_scream.log", "RTP streaming complete", timeout=300)
 
     # Restore config
     os.system(f"sed -i 's/QUIC: False/QUIC: True/' {_config}")

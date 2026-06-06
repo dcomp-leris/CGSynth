@@ -240,10 +240,9 @@ def read_qr_code_from_frame(frame):
 
 
 if scream_state==False:
-    # GStreamer pipeline to receive video stream from port 5000
-
+    # timeout=3000000000 ns = 3s — after server stops, udpsrc emits EOS so cap.read() returns False
     gstreamer_pipeline = (
-         f"udpsrc port={player_port} ! application/x-rtp, payload=96 ! "
+        f"udpsrc port={player_port} timeout=3000000000 ! application/x-rtp, payload=96 ! "
         f"queue max-size-time=1000000000 ! {myrtp} ! {mydecoder} ! videoconvert ! appsink"
     )
     '''
@@ -319,7 +318,16 @@ previous_command = None
 cmd_previoustime =frm_previoustime = time.perf_counter()
 currrent_cps = 0
 current_fps = 0
-my_try_counter = 0 
+my_try_counter = 0
+
+# Watchdog: exit cleanly if streaming takes longer than expected (handles cap.read() hangs)
+import threading as _threading, os as _os
+_MAX_STREAM_DURATION = (stop_frm_number / config["encoding"]["fps"]) * 4 + 20
+def _watchdog():
+    _threading.Event().wait(timeout=_MAX_STREAM_DURATION)
+    print("RTP streaming complete.")
+    _os._exit(0)
+_threading.Thread(target=_watchdog, daemon=True).start()
 
 while True:
 
@@ -327,12 +335,15 @@ while True:
 
     # Try to receive the next frame
     ret, frame = cap.read()
-    frm_rcv = time.perf_counter() # time.time() * 1000
-    #test_timestamp = cap.get(cv2.CAP_PROP_POS_MSEC)
-    #print("Debug:***************",test_timestamp)
+    frm_rcv = time.perf_counter()
 
-    # Read QR code from the buffered frame
-    frame_id, qr_data = read_qr_code_from_frame(frame)
+    if not ret or frame is None:
+        print("RTP streaming complete.")
+        break
+
+    # Use frame_counter as frame_id (QR decoding skipped — too slow for RTP/SCReAM path)
+    frame_id = frame_counter
+    qr_data = None
     current_fps = 1/(frm_rcv-frm_previoustime)
     frm_previoustime = frm_rcv
 
@@ -470,7 +481,11 @@ while True:
 
     my_try_counter = my_try_counter + 1
     print(f'Received Frame # is: {my_try_counter}')
-    
+
+    if my_try_counter >= stop_frm_number:
+        print("RTP streaming complete.")
+        break
+
     # Write any remaining in the log
     if log_frame_buffer:
         with open(frame_log, "a") as f:

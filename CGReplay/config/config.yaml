@@ -101,10 +101,10 @@ Running:
 # ScreAM Setup
 protocols:
     SCReAM: False # False = 0 / True = 1
-    sender: "../scream/gstscream/scripts/sender.sh"
-    receiver: "../scream/gstscream/scripts/receiver.sh"
+    sender: "../../scream/gstscream/scripts/sender.sh"
+    receiver: "../../scream/gstscream/scripts/receiver.sh"
     # QUIC transport (used by quic_sender.py / quic_receiver.py)
-    QUIC: True
+    QUIC: False
     quic_port: 4433
     quic_cert: "../../rtp_stream_creation/server.pem"
     quic_key:  "../../rtp_stream_creation/server.key"

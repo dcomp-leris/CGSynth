@@ -2,9 +2,12 @@ import cv2
 import os
 import subprocess
 import csv
+from skimage.metrics import structural_similarity as _skimage_ssim
 
 def ssim(img1, img2):
-    return cv2.quality.QualitySSIM_compute(img1, img2)[0][0]
+    gray1 = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
+    gray2 = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+    return _skimage_ssim(gray1, gray2, data_range=255)
 
 def psnr(img1, img2):
     return cv2.PSNR(img1, img2)

@@ -22,7 +22,6 @@ from video_Quality import compare_images
 
 CONFIG_PATH   = "config/config.yaml"
 REF_FOLDER    = os.path.join("server", "Kombat")
-TGT_FOLDER    = os.path.join("player", "received_frames")
 LOGS_DIR      = os.path.join("player", "logs")
 
 with open(CONFIG_PATH) as f:
@@ -62,11 +61,16 @@ def compute_metrics(mode: str):
     quality_csv = os.path.join(LOGS_DIR, f"quality_{mode}.csv")
     metrics_csv = os.path.join(LOGS_DIR, f"metrics_{mode}.csv")
 
+    # Use mode-specific backup if it exists, otherwise fall back to shared dir
+    tgt_mode = os.path.join("player", f"received_frames_{mode}")
+    tgt_fallback = os.path.join("player", "received_frames")
+    tgt_folder = tgt_mode if os.path.isdir(tgt_mode) else tgt_fallback
+
     # Step 1 — per-frame video quality (SSIM, PSNR, VMAF if available)
-    print(f"  Computing SSIM/PSNR on frames 1..{STOP_FRAME-1} ...")
+    print(f"  Computing SSIM/PSNR on frames 1..{STOP_FRAME-1} (frames dir: {tgt_folder}) ...")
     compare_images(
         ref_folder=REF_FOLDER,
-        tgt_folder=TGT_FOLDER,
+        tgt_folder=tgt_folder,
         start_num=1,
         end_num=STOP_FRAME - 1,
         csv_path=quality_csv,
@@ -85,11 +89,13 @@ def compute_metrics(mode: str):
     df["QoE"] = df["SSIM"] * (df["fps"].clip(upper=FPS_TARGET) / FPS_TARGET)
 
     # Step 4 — bucket into 1-second windows
+    # For RTP/SCReAM, responsetime_CG.csv only has command frames — most rows lack a timestamp.
+    # Fill missing timestamps using frame_id / fps as a monotonic estimate.
     if "timestamp" in df.columns and df["timestamp"].notna().any():
         t0 = df["timestamp"].dropna().min()
-        df["second"] = ((df["timestamp"] - t0)).astype(int)
+        df["timestamp"] = df["timestamp"].fillna(df["frame_id"] / FPS_TARGET + t0)
+        df["second"] = (df["timestamp"] - t0).clip(lower=0).astype(int)
     else:
-        # fallback: assign sequential seconds
         df["second"] = (df["frame_id"] / FPS_TARGET).astype(int)
 
     agg = df.groupby("second").agg(
