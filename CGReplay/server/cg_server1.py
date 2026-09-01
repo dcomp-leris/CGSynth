@@ -76,14 +76,20 @@ fps = config["encoding"]["fps"]                                 # Frame Rate (fp
 resolution_width = config["encoding"]["resolution"]["width"]    # Width 
 resolution_height = config["encoding"]["resolution"]["height"]  # Height
 GOP = config["encoding"]["GOP"]
-MyvideoEncoder = config["encoding"]["name"] # Encoder name e.g., H.264/H.265 
+MyvideoEncoder = config["encoding"]["name"] # Encoder name e.g., H.264/H.265
 myencoder = config["encoding"][MyvideoEncoder]["encoder"]
 myparser = config["encoding"][MyvideoEncoder]["parsing"]
 myrtp = config["encoding"][MyvideoEncoder]["packetization"]
+# x265enc emits VPS/SPS/PPS only once by default. The player launches ~1s after
+# the server, so it joins mid-stream and never sees the parameter sets — it
+# decodes nothing. repeat-headers=1 puts them on every IDR (x264enc already
+# repeats SPS/PPS, so H.264 needs no extra option).
+enc_extra = 'option-string="repeat-headers=1"' if MyvideoEncoder in ("H.265", "H265", "HEVC") else ""
 # Loading Protocols Setup **************************************************************************************
 scream_state=config["protocols"]["SCReAM"]                      # CCA Protocol for UDP as SCReAM developed by Ericsson!
 scream_sender=config["protocols"]["sender"]                     # Sender as CGServer!
 quic_state  =config["protocols"].get("QUIC", False)            # QUIC transport (replaces RTP when True)
+roq_state   =config["protocols"].get("RoQ", False)             # RoQ transport: RTP over QUIC datagrams
 
 
 # Loading Sync Setup *******************************************************************************************
@@ -242,8 +248,8 @@ def stream_frames(game_name):
         pipeline_str = f"""
             appsrc name=source is-live=true block=true format=GST_FORMAT_TIME do-timestamp=true !
             videoconvert ! video/x-raw,format=I420,width={resolution_width},height={resolution_height},framerate={fps}/1 !
-            {myencoder} bitrate={bitrate} speed-preset=ultrafast tune=zerolatency key-int-max={GOP} !
-            {myparser} ! {myrtp} ! 
+            {myencoder} bitrate={bitrate} speed-preset=ultrafast tune=zerolatency key-int-max={GOP} {enc_extra} !
+            {myparser} ! {myrtp} !
             udpsink host={player_ip} port={player_port} bind-port={cg_server_port}
         """
         
@@ -533,6 +539,11 @@ if __name__ == "__main__":
         import asyncio
         print("[CGReplay] QUIC transport selected — delegating to quic_sender")
         asyncio.run(quic_main())
+    elif roq_state:
+        from roq_sender import main as roq_main
+        import asyncio
+        print("[CGReplay] RoQ transport selected — delegating to roq_sender")
+        asyncio.run(roq_main())
     else:
         stream_frames(game_name)
 

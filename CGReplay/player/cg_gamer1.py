@@ -71,6 +71,30 @@ if os.path.exists(rate_log):
 if os.path.exists(time_log):
     os.remove(time_log)
 
+# QUIC path — delegate BEFORE touching the RTP/SCReAM logs below. Otherwise a
+# QUIC run truncates ply_frame.csv / responsetime_CG.csv and wipes the data the
+# other two modes wrote on their own runs.
+quic_state = config["protocols"].get("QUIC", False)
+if quic_state:
+    subprocess.run("../port_clean.sh")
+    with open("/tmp/player_ready", "w") as f:
+        f.write("ready")
+    from quic_receiver import run_player as quic_run
+    print("[CGReplay] QUIC transport selected — delegating to quic_receiver", flush=True)
+    quic_run()
+    raise SystemExit(0)
+
+# RoQ path — same rationale as QUIC: delegate before touching the shared logs.
+roq_state = config["protocols"].get("RoQ", False)
+if roq_state:
+    subprocess.run("../port_clean.sh")
+    with open("/tmp/player_ready", "w") as f:
+        f.write("ready")
+    from roq_receiver import run_player as roq_run
+    print("[CGReplay] RoQ transport selected — delegating to roq_receiver", flush=True)
+    roq_run()
+    raise SystemExit(0)
+
 # Remove frame Log
 if os.path.exists(frame_log):
     os.remove(frame_log)
@@ -104,18 +128,6 @@ myrtp = config["encoding"][MyvideoEncoder]["Depacketization"]
 # Scream enable or disable
 scream_state=config["protocols"]["SCReAM"]
 scream_receiver=config["protocols"]["receiver"]
-quic_state  =config["protocols"].get("QUIC", False)  # QUIC transport (replaces RTP when True)
-
-# QUIC path — exit before display thread and GStreamer setup; cv2/Qt crashes inside Mininet without DISPLAY
-if quic_state:
-    subprocess.run("../port_clean.sh")
-    with open("/tmp/player_ready", "w") as f:
-        f.write("ready")
-    from quic_receiver import main as quic_main
-    import asyncio
-    print("[CGReplay] QUIC transport selected — delegating to quic_receiver", flush=True)
-    asyncio.run(quic_main())
-    raise SystemExit(0)
 
 # Custom function to load autocommands.txt while handling the complex 'command' field
 def load_syncfile(file_path):
@@ -256,6 +268,31 @@ else:
     gstreamer_pipeline = receiver_output.stdout.strip()  # Remove any extra whitespace
     print(f"Using GStreamer pipeline: {gstreamer_pipeline}")
 
+# Watchdog: arm it BEFORE opening the capture. VideoCapture creation and the
+# first cap.read() can block forever if the server never delivers a decodable
+# frame (e.g. a stall), so the watchdog must already be running by then.
+#
+# It is IDLE-based, not a fixed total duration: as long as frames keep arriving
+# the player keeps running, so slow encoders (H.265) and rate-limited transports
+# (SCReAM) can stream all the way to the end instead of being cut off part-way.
+# A fixed-duration watchdog cut the tail of every slow run (frames after the
+# cutoff were simply never received). This exits only after _IDLE_TIMEOUT seconds
+# with no new frame (true end-of-stream or a genuine stall); _HARD_CAP is a
+# last-resort absolute ceiling so it can never hang forever.
+import threading as _threading, os as _os
+_IDLE_TIMEOUT = 20.0  # seconds with no new frame → assume the stream ended
+_HARD_CAP     = (stop_frm_number / config["encoding"]["fps"]) * 12 + 60
+_activity     = [time.perf_counter()]   # updated in the receive loop per frame
+_start_ts     = time.perf_counter()
+def _watchdog():
+    while True:
+        _threading.Event().wait(timeout=2.0)
+        now = time.perf_counter()
+        if (now - _activity[0]) > _IDLE_TIMEOUT or (now - _start_ts) > _HARD_CAP:
+            print("RTP streaming complete.")
+            _os._exit(0)
+_threading.Thread(target=_watchdog, daemon=True).start()
+
 # Open the video stream using OpenCV and GStreamer
 cap = cv2.VideoCapture(gstreamer_pipeline, cv2.CAP_GSTREAMER)
 
@@ -320,15 +357,6 @@ currrent_cps = 0
 current_fps = 0
 my_try_counter = 0
 
-# Watchdog: exit cleanly if streaming takes longer than expected (handles cap.read() hangs)
-import threading as _threading, os as _os
-_MAX_STREAM_DURATION = (stop_frm_number / config["encoding"]["fps"]) * 4 + 20
-def _watchdog():
-    _threading.Event().wait(timeout=_MAX_STREAM_DURATION)
-    print("RTP streaming complete.")
-    _os._exit(0)
-_threading.Thread(target=_watchdog, daemon=True).start()
-
 while True:
 
     start_time = time.perf_counter() # time.time()
@@ -340,6 +368,8 @@ while True:
     if not ret or frame is None:
         print("RTP streaming complete.")
         break
+
+    _activity[0] = frm_rcv   # tell the idle watchdog a frame just arrived
 
     # Use frame_counter as frame_id (QR decoding skipped — too slow for RTP/SCReAM path)
     frame_id = frame_counter

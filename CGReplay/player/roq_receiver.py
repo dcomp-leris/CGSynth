@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
 """
-CGReplay QUIC Receiver — player side.
+CGReplay RoQ Receiver — player side (RTP over QUIC, datagram mode).
 
-Connects to quic_sender.py on the server.
-Receives one video frame per QUIC stream (server-unidirectional).
-Sends Ack / Nack / command on a client-initiated unidirectional stream.
+Connects to roq_sender.py. Receives RTP packets carried on QUIC datagrams
+(RFC 9683 datagram mode), reassembles the fragments of each frame, and decodes.
+Frames whose fragments never all arrive are dropped (unreliable) — the point of
+RoQ vs plain UDP/RTP is that QUIC's congestion control still applies.
+
+The control channel (Ack / Nack / joystick command) is sent on a reliable QUIC
+stream, same as the QUIC receiver.
 
 Run from CGReplay/player/:
     source ~/venv/bin/activate
-    python3 quic_receiver.py
+    python3 roq_receiver.py
 """
 
 import asyncio
@@ -22,13 +26,13 @@ import cv2
 import numpy as np
 import pandas as pd
 import av
-from collections import defaultdict
 from pyzbar import pyzbar
 from aioquic.asyncio import connect
 from aioquic.quic.configuration import QuicConfiguration
 from aioquic.asyncio.protocol import QuicConnectionProtocol
 from aioquic.quic.events import (
     StreamDataReceived,
+    DatagramFrameReceived,
     HandshakeCompleted,
     ConnectionTerminated,
 )
@@ -61,13 +65,21 @@ os.makedirs(RECV_DIR, exist_ok=True)
 for f in glob.glob(os.path.join(RECV_DIR, "*.png")):
     os.remove(f)
 
-# Frame header sent by quic_sender: [4B frame_id][4B payload_size][8B send_timestamp]
-HEADER_FMT  = "!IId"
-HEADER_SIZE = struct.calcsize(HEADER_FMT)   # 16 bytes
+# RoQ packet headers (must match roq_sender.py)
+RTP_FMT   = "!BBHII"
+RTP_SIZE  = struct.calcsize(RTP_FMT)    # 12 bytes
+FRAG_FMT  = "!IHHd"
+FRAG_SIZE = struct.calcsize(FRAG_FMT)   # 16 bytes
+HDR_SIZE  = RTP_SIZE + FRAG_SIZE        # 28 bytes
 
-FRAME_LOG = os.path.join(LOG_DIR, "ply_quic_frame.csv")
-RATE_LOG  = os.path.join(LOG_DIR, "ratelog_quic.csv")
-EVENT_LOG = os.path.join(LOG_DIR, "ply_quic_events.csv")
+# A frame still incomplete this many frame ids behind the newest one seen is
+# considered lost and dropped (small reordering window).
+REORDER_WINDOW = 3
+IDLE_TIMEOUT   = 5.0    # finish if no datagram arrives for this long (after 1+ frames)
+
+FRAME_LOG = os.path.join(LOG_DIR, "ply_roq_frame.csv")
+RATE_LOG  = os.path.join(LOG_DIR, "ratelog_roq.csv")
+EVENT_LOG = os.path.join(LOG_DIR, "ply_roq_events.csv")
 RT_LOG    = os.path.join(LOG_DIR, "responsetime_CG.csv")
 
 with open(FRAME_LOG, "w") as f:
@@ -80,7 +92,7 @@ with open(RT_LOG, "w") as f:
     f.write("frame_id,frame_timestamp,cmd_timestamp\n")
 
 # ---------------------------------------------------------------------------
-# Sync file loader — same format as cg_gamer1.py
+# Sync file loader — same format as cg_gamer1.py / quic_receiver.py
 # ---------------------------------------------------------------------------
 
 def load_syncfile(file_path: str) -> pd.DataFrame:
@@ -98,7 +110,7 @@ def load_syncfile(file_path: str) -> pd.DataFrame:
 sync_df = load_syncfile(SYNC_FILE)
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helpers (identical to quic_receiver.py)
 # ---------------------------------------------------------------------------
 
 def decode_h264(data: bytes) -> np.ndarray | None:
@@ -129,10 +141,7 @@ def read_qr(frame: np.ndarray) -> tuple[int, str | None]:
 
 
 # ---------------------------------------------------------------------------
-# Live display — handled by a separate process (frame_viewer.py) running under
-# the SYSTEM Python. The venv's Qt5 OpenCV does not render reliably as root
-# inside Mininet; the system's GTK build does (same path RTP/SCReAM use). The
-# receiver just writes frames to RECV_DIR and the viewer shows the newest one.
+# Live display — same separate-process viewer used by the QUIC receiver.
 # ---------------------------------------------------------------------------
 SYS_PY      = "/usr/bin/python3"
 VIEWER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frame_viewer.py")
@@ -140,21 +149,27 @@ STOP_FILE   = "/tmp/quic_viewer_stop"
 
 
 # ---------------------------------------------------------------------------
-# QUIC protocol handler
+# RoQ protocol handler
 # ---------------------------------------------------------------------------
 
-class QUICReceiverProtocol(QuicConnectionProtocol):
+class RoQReceiverProtocol(QuicConnectionProtocol):
     """
-    Accumulates per-stream data until end_stream, then decodes the frame.
-    Sends Ack to server on a client-initiated unidirectional stream.
+    Reassembles RTP-over-QUIC datagram fragments per frame id, decodes complete
+    frames, and drops frames whose fragments never all arrive (unreliable).
+    Sends control on a client-initiated reliable stream.
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Buffer per stream: stream_id -> bytearray
-        self._buffers: dict[int, bytearray] = defaultdict(bytearray)
+        # frame_id -> {frag_index: chunk}, plus expected count and send_time
+        self._frags: dict[int, dict[int, bytes]] = {}
+        self._frag_count: dict[int, int] = {}
+        self._frag_time: dict[int, float] = {}
+        self._delivered: set[int] = set()
+        self._max_seen = -1
         self._ctrl_stream_id: int | None = None
         self._frame_count = 0
+        self._dropped = 0
         self._cmd_count = 0
         self._frame_counter = 1        # tracks sequence for sync file matching
         self._previous_time = time.perf_counter()
@@ -162,60 +177,97 @@ class QUICReceiverProtocol(QuicConnectionProtocol):
         self._current_fps = 0.0
         self._current_cps = 0.0
         self._session_start = time.perf_counter()
+        self._last_rx = time.perf_counter()
         self._done = asyncio.Event()
+        self._watchdog: asyncio.Task | None = None
 
     def quic_event_received(self, event):
         if isinstance(event, HandshakeCompleted):
-            print("[QUIC] Handshake complete — waiting for frames")
-            # Open the control stream now (client-unidirectional)
+            print("[RoQ] Handshake complete — waiting for RTP datagrams")
+            # Open the reliable control stream (client-unidirectional)
             self._ctrl_stream_id = self._quic.get_next_available_stream_id(
                 is_unidirectional=True
             )
+            self._watchdog = asyncio.ensure_future(self._idle_watchdog())
 
-        elif isinstance(event, StreamDataReceived):
-            self._buffers[event.stream_id] += event.data
-
-            if event.end_stream:
-                self._process_stream(event.stream_id)
+        elif isinstance(event, DatagramFrameReceived):
+            self._last_rx = time.perf_counter()
+            self._handle_datagram(event.data)
 
         elif isinstance(event, ConnectionTerminated):
-            print("[QUIC] Connection terminated")
+            print("[RoQ] Connection terminated")
             self._done.set()
 
-    def _process_stream(self, stream_id: int):
-        raw = bytes(self._buffers.pop(stream_id, b""))
-        if len(raw) < HEADER_SIZE:
-            return  # too short for header
+    async def _idle_watchdog(self):
+        """Finish the session if the stream goes silent (e.g. last frame lost)."""
+        while not self._done.is_set():
+            await asyncio.sleep(1.0)
+            if self._frame_count > 0 and (time.perf_counter() - self._last_rx) > IDLE_TIMEOUT:
+                print(f"[RoQ] Idle for {IDLE_TIMEOUT:.0f}s — finishing.")
+                self._finish()
+                return
 
-        # Parse frame header: [4B frame_id][4B payload_size][8B send_timestamp]
-        frame_id, payload_size, tx_time = struct.unpack(HEADER_FMT, raw[:HEADER_SIZE])
-        payload = raw[HEADER_SIZE:]
-
-        if len(payload) != payload_size:
-            print(f"[WARN] stream={stream_id} frame={frame_id}: "
-                  f"expected {payload_size}B got {len(payload)}B")
-            self._send_control(frame_id, "Nack")
+    def _handle_datagram(self, data: bytes):
+        if len(data) < HDR_SIZE:
             return
+        # RTP header is parsed for completeness; frag header carries the app metadata.
+        _b0, _b1, _seq, _ts, _ssrc = struct.unpack(RTP_FMT, data[:RTP_SIZE])
+        frame_id, frag_index, frag_count, send_time = struct.unpack(
+            FRAG_FMT, data[RTP_SIZE:HDR_SIZE])
+        chunk = data[HDR_SIZE:]
 
+        if frame_id in self._delivered:
+            return  # duplicate / late fragment of an already-decoded frame
+
+        if frame_id > self._max_seen:
+            self._max_seen = frame_id
+
+        buf = self._frags.setdefault(frame_id, {})
+        buf[frag_index] = chunk
+        self._frag_count[frame_id] = frag_count
+        self._frag_time.setdefault(frame_id, send_time)
+
+        if len(buf) == frag_count:
+            payload = b"".join(buf[i] for i in range(frag_count))
+            self._deliver_frame(frame_id, payload, self._frag_time[frame_id])
+            self._forget(frame_id, delivered=True)
+
+        # Drop frames that fell too far behind while still incomplete (lost).
+        self._purge_stale()
+
+    def _forget(self, frame_id: int, delivered: bool):
+        self._frags.pop(frame_id, None)
+        self._frag_count.pop(frame_id, None)
+        self._frag_time.pop(frame_id, None)
+        if delivered:
+            self._delivered.add(frame_id)
+
+    def _purge_stale(self):
+        cutoff = self._max_seen - REORDER_WINDOW
+        stale = [fid for fid in self._frags if fid <= cutoff]
+        for fid in stale:
+            self._dropped += 1
+            have = len(self._frags[fid])
+            need = self._frag_count.get(fid, 0)
+            print(f"[DROP] frame={fid:04d}  incomplete ({have}/{need} frags)")
+            self._forget(fid, delivered=True)  # never deliver it later
+
+    def _deliver_frame(self, frame_id: int, payload: bytes, tx_time: float):
         frame_recv_time = time.perf_counter()
         self._current_fps = 1.0 / max(frame_recv_time - self._previous_time, 1e-6)
         self._previous_time = frame_recv_time
 
-        # Decode H.264
         frame = decode_h264(payload)
         if frame is None:
-            print(f"[WARN] frame={frame_id}: H.264 decode failed")
+            print(f"[WARN] frame={frame_id}: {DEC_CODEC} decode failed")
             self._send_control(frame_id, "Nack")
             return
 
-        # Read QR code
         detected_id, qr_data = read_qr(frame)
-
-        # Save frame — the viewer process picks the newest one up from here.
-        # Atomic write (temp + rename) so the viewer never reads a half-written
-        # PNG (which prints a harmless-but-noisy libpng "Read Error"). imencode
-        # fixes the format from the ".png" arg, so the temp name is free to be
-        # one the viewer's *.png glob won't match.
+        # Atomic write: the live viewer globs *.png and reads the newest file.
+        # Writing in place lets it read a half-written PNG (libpng "Read Error").
+        # imencode fixes the format from the ".png" arg (not the filename), so
+        # the temp name can be one the *.png glob won't match; rename atomically.
         _final = os.path.join(RECV_DIR, f"{frame_id:04d}.png")
         _tmp   = os.path.join(RECV_DIR, f".{frame_id:04d}.png.part")
         _ok, _buf = cv2.imencode(".png", frame)
@@ -225,7 +277,7 @@ class QUICReceiverProtocol(QuicConnectionProtocol):
             os.replace(_tmp, _final)
 
         with open(FRAME_LOG, "a") as f:
-            f.write(f"{frame_id},{payload_size},{frame_recv_time:.6f},{self._current_fps:.2f}\n")
+            f.write(f"{frame_id},{len(payload)},{frame_recv_time:.6f},{self._current_fps:.2f}\n")
 
         self._frame_count += 1
         n_cmds = 0
@@ -252,20 +304,25 @@ class QUICReceiverProtocol(QuicConnectionProtocol):
             response_time_ms = 0.0
 
         print(f"[RX]  frame={frame_id:04d}  qr={detected_id:4}  "
-              f"size={payload_size:7d}B  fps={self._current_fps:5.1f}")
+              f"size={len(payload):7d}B  fps={self._current_fps:5.1f}")
 
         with open(EVENT_LOG, "a") as f:
-            f.write(f"{frame_recv_time:.6f},FRAME,{frame_id},{payload_size},{self._current_fps:.2f},{n_cmds},{response_time_ms:.1f}\n")
+            f.write(f"{frame_recv_time:.6f},FRAME,{frame_id},{len(payload)},{self._current_fps:.2f},{n_cmds},{response_time_ms:.1f}\n")
 
         self._frame_counter += 1
 
         if frame_id >= STOP_FRAME - 1:
-            duration = time.perf_counter() - self._session_start
-            avg_fps = self._frame_count / max(duration, 1e-6)
-            print(f"\n[SUMMARY] frames={self._frame_count}  commands={self._cmd_count}"
-                  f"  avg_fps={avg_fps:.1f}  duration={duration:.1f}s")
-            cv2.destroyAllWindows()
-            self._done.set()
+            self._finish()
+
+    def _finish(self):
+        if self._done.is_set():
+            return
+        duration = time.perf_counter() - self._session_start
+        avg_fps = self._frame_count / max(duration, 1e-6)
+        print(f"\n[SUMMARY] frames={self._frame_count}  dropped={self._dropped}"
+              f"  commands={self._cmd_count}  avg_fps={avg_fps:.1f}  duration={duration:.1f}s")
+        cv2.destroyAllWindows()
+        self._done.set()
 
     def _send_control(self, frame_id: int, msg_type: str,
                       cmd: str = "0", number: int = 0):
@@ -291,36 +348,32 @@ class QUICReceiverProtocol(QuicConnectionProtocol):
 async def main():
     configuration = QuicConfiguration(is_client=True)
     configuration.verify_mode = False          # self-signed cert in dev
-    configuration.alpn_protocols = ["cgquic"]
+    configuration.alpn_protocols = ["cgroq"]
+    configuration.max_datagram_frame_size = 65536   # enable QUIC DATAGRAM extension
 
-    print(f"[QUIC] Connecting to {SERVER_IP}:{QUIC_PORT}")
-    print(f"[QUIC] Game={GAME}  stop_frame={STOP_FRAME}  sync={SYNC_FILE}  commands={len(sync_df)}")
+    print(f"[RoQ] Connecting to {SERVER_IP}:{QUIC_PORT}")
+    print(f"[RoQ] Game={GAME}  stop_frame={STOP_FRAME}  sync={SYNC_FILE}  commands={len(sync_df)}")
 
     async with connect(
         host=SERVER_IP,
         port=QUIC_PORT,
         configuration=configuration,
-        create_protocol=QUICReceiverProtocol,
+        create_protocol=RoQReceiverProtocol,
     ) as protocol:
         await protocol._done.wait()
 
-    print("[QUIC] Receiver finished.")
+    print("[RoQ] Receiver finished.")
 
 
 def run_player():
-    """Synchronous entry point.
-
-    Launches the live video window as a separate system-Python process (GTK
-    OpenCV, which renders as root inside Mininet), then runs the QUIC asyncio
-    logic in this thread. The viewer is told to stop when the stream finishes.
-    """
+    """Synchronous entry point (mirrors quic_receiver.run_player)."""
     viewer = None
     if LIVE_WATCHING:
         if os.path.exists(STOP_FILE):
             os.remove(STOP_FILE)
         try:
             viewer = subprocess.Popen([SYS_PY, VIEWER_PATH, os.path.abspath(RECV_DIR)])
-            print("[QUIC] Live viewer started (system Python / GTK)")
+            print("[RoQ] Live viewer started (system Python / GTK)")
         except Exception as e:
             print(f"[WARN] could not start live viewer: {e}")
 
@@ -339,4 +392,4 @@ if __name__ == "__main__":
     try:
         run_player()
     except KeyboardInterrupt:
-        print("\n[QUIC] Receiver stopped.")
+        print("\n[RoQ] Receiver stopped.")

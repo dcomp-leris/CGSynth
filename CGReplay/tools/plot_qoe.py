@@ -20,9 +20,9 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 
 LOGS_DIR  = os.path.join("player", "logs")
-MODES     = ["quic", "rtp", "scream"]
-COLORS    = {"quic": "#1f77b4", "rtp": "#ff7f0e", "scream": "#2ca02c"}
-LABELS    = {"quic": "QUIC", "rtp": "Pure UDP (RTP)", "scream": "SCReAM"}
+MODES     = ["quic", "rtp", "roq", "scream"]
+COLORS    = {"quic": "#1f77b4", "rtp": "#ff7f0e", "roq": "#9467bd", "scream": "#2ca02c"}
+LABELS    = {"quic": "QUIC", "rtp": "Pure UDP (RTP)", "roq": "RoQ (RTP/QUIC)", "scream": "SCReAM"}
 
 FIG_DPI   = 300
 FIG_SIZE  = (8, 4)
@@ -37,26 +37,42 @@ def load(mode: str) -> pd.DataFrame | None:
 
 
 def styled_ax(ax, ylabel: str, title: str):
-    ax.set_xlabel("Time (s)", fontsize=11)
-    ax.set_ylabel(ylabel, fontsize=11)
-    ax.set_title(title, fontsize=12, fontweight="bold")
-    ax.legend(fontsize=10)
+    ax.set_xlabel("Frame", fontsize=13, fontweight="bold")
+    ax.set_ylabel(ylabel, fontsize=13, fontweight="bold")
+    ax.set_title(title, fontsize=13, fontweight="bold")
+    ax.tick_params(axis="both", labelsize=11)
+    ax.legend(fontsize=11)
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.xaxis.set_major_locator(ticker.MaxNLocator(integer=True))
     plt.tight_layout()
 
 
+# Distinct line style + marker per mode (so the curves read apart in print too)
+STYLES  = {"quic": "-", "rtp": "--", "roq": "-.", "scream": ":"}
+MARKERS = {"quic": "o", "rtp": "s", "roq": "^", "scream": "D"}
+
+
 def plot_figure(col: str, ylabel: str, title: str, filename: str,
-                ylim=None, smooth_window: int = 3):
+                ylim=None, scatter=False):
     fig, ax = plt.subplots(figsize=FIG_SIZE)
     plotted = False
     for mode in MODES:
         df = load(mode)
-        if df is None or col not in df.columns:
+        if df is None or col not in df.columns or "frame_id" not in df.columns:
             continue
-        y = df[col].rolling(smooth_window, min_periods=1, center=True).mean()
-        ax.plot(df["second"], y,
-                color=COLORS[mode], label=LABELS[mode], linewidth=1.8)
+        if scatter:
+            # Response time exists only at command frames (sparse, event-based)
+            # — show as markers, not a line connecting distant points.
+            ax.plot(df["frame_id"], df[col],
+                    color=COLORS[mode], label=LABELS[mode],
+                    linestyle="none", marker=MARKERS[mode], markersize=6,
+                    markeredgecolor="white", markeredgewidth=0.6)
+        else:
+            # Fixed frame axis; NaN frames (lost) stay as gaps in the line
+            ax.plot(df["frame_id"], df[col],
+                    color=COLORS[mode], label=LABELS[mode],
+                    linestyle=STYLES[mode], linewidth=2.2,
+                    marker=MARKERS[mode], markersize=4, markevery=8)
         plotted = True
     if not plotted:
         print(f"  [skip] no data for {col}")
@@ -64,6 +80,7 @@ def plot_figure(col: str, ylabel: str, title: str, filename: str,
         return
     if ylim:
         ax.set_ylim(*ylim)
+    ax.margins(x=0.01)
     styled_ax(ax, ylabel, title)
     out = os.path.join(LOGS_DIR, filename)
     fig.savefig(out, dpi=FIG_DPI, bbox_inches="tight")
@@ -77,7 +94,7 @@ if __name__ == "__main__":
     plot_figure(
         col="SSIM",
         ylabel="Video Quality (SSIM)",
-        title="Fig. 1 — Video Quality vs Time",
+        title="Fig. 1 — Video Quality vs Frame",
         filename="fig1_ssim.png",
         ylim=(0, 1),
     )
@@ -85,14 +102,15 @@ if __name__ == "__main__":
     plot_figure(
         col="response_time_ms",
         ylabel="Response Time (ms)",
-        title="Fig. 2 — Response Time vs Time",
+        title="Fig. 2 — Response Time vs Frame",
         filename="fig2_rt.png",
+        scatter=True,
     )
 
     plot_figure(
         col="QoE",
         ylabel="QoE  [SSIM × FPS / FPS_target]",
-        title="Fig. 3 — QoE vs Time",
+        title="Fig. 3 — QoE vs Frame",
         filename="fig3_qoe.png",
         ylim=(0, 1),
     )

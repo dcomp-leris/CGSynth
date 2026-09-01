@@ -28,23 +28,23 @@ gamer:
 # ---------------------------------------------------------------------------------------#
 # Game Data Setup 
 Forza:  # possible values: Fortnite  or  Kombat
-    name: "Forza"
+    name: "H.264"
     sync_file: "./syncs/sync_forza.txt"
     frames: "./Forza"
 
 Fortnite: 
-    name: "Fortnite"
+    name: "H.264"
     sync_file: "./syncs/sync_fortnite.txt"
     frames: "./Fortnite"
 
 Kombat: 
-    name: "Kombat"
+    name: "H.264"
     sync_file: "./syncs/sync_kombat.txt"
     frames: "./Kombat"
 # ---------------------------------------------------------------------------------------#
 # Encoding setup 
 encoding:
-    name: "H.264" # Default
+    name: "H.264"
     H.264:
         encoder: "x264enc"
         parsing: "h264parse"
@@ -57,14 +57,14 @@ encoding:
         packetization: "rtph265pay"
         decoder: "avdec_h265"
         Depacketization: "rtph265depay"
-    fps: 30  # Frames per second
+    fps: 30
     GOP: 3
     resolution:
-        width: 1280 # 1280 #800 #600 # default 1364 server ==> # 1920
-        height: 720 #720  #720 #700 #400 # default 768  server ==? # 1080
-    starting_bitrate: 1400 # 5000 Kbps Note: To have less frame loss, please set it to a appropriate value for begining! 
-    bitrate_min: 1000
-    bitrate_max: 2000
+        width: 960
+        height: 540
+    starting_bitrate: 5000 # Kbps. Raised from 1400 so all-I-frame QUIC has enough bits per 720p frame (was starving each I-frame to ~5KB -> low VMAF).
+    bitrate_min: 2000
+    bitrate_max: 6000
 # ---------------------------------------------------------------------------------------#
 # Description: common Resolution
     # 1920×1080 (Full HD, 1080p)
@@ -92,8 +92,8 @@ sync:
 # ---------------------------------------------------------------------------------------#
 # CGReplay Running Setup
 Running:
-    game: "Kombat"     # Set it to start the CGReplay specific Game
-    live_watching: True    # If you want to watch live gameplay set 'True' else set 'False'
+    game: "Kombat"
+    live_watching: True
     duration: 30   # in seconds
     stop_frm_number: 120
 
@@ -105,6 +105,9 @@ protocols:
     receiver: "../../scream/gstscream/scripts/receiver.sh"
     # QUIC transport (used by quic_sender.py / quic_receiver.py)
     QUIC: False
+    # RoQ transport — RTP over QUIC datagrams (roq_sender.py / roq_receiver.py).
+    # Reuses quic_port/quic_cert/quic_key; RoQ and QUIC never run at once.
+    RoQ: False
     quic_port: 4433
     quic_cert: "../../rtp_stream_creation/server.pem"
     quic_key:  "../../rtp_stream_creation/server.key"
